@@ -46,9 +46,9 @@ _AREA_NUM = {'p1': 1, 'p2': 2, 'p3': 3}
 #   常规(1xx)/中支(3xx) → 拍照位 -50°（偏 +10°）
 #   细支(2xx)          → 拍照位 -55°（偏 +5°）
 # 偏航补偿角 = 拍照位 J1 − 正对 J1
-_J1_FACE_DEG = -60.0            # 正对（雷达垂直箱面）时的 J1
-_J1_PHOTO_REGULAR_DEG = -50.0  # 常规箱(1xx) / 中支箱(3xx) 拍照位 J1
-_J1_PHOTO_SLIM_DEG = -55.0     # 细支烟箱(2xx) 拍照位 J1
+_J1_FACE_DEG = -60.5            # 正对（雷达垂直箱面）时的 J1
+_J1_PHOTO_REGULAR_DEG = -53.1  # 常规箱(1xx) / 中支箱(3xx) 拍照位 J1
+_J1_PHOTO_SLIM_DEG = -56.6     # 细支烟箱(2xx) 拍照位 J1
 
 
 def _yaw_offset_for_box(box_type) -> float:

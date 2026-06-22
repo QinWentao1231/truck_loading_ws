@@ -7,7 +7,7 @@ import copy
 
 def process_point_cloud(pcd, method):
     # #保存pcd点云到路径
-    # target_file_path = "/home/simplenav/Test_ws/corn_poits.pcd"
+    # target_file_path = "/home/fanuc/Test_ws/corn_poits.pcd"
     # success = o3d.io.write_point_cloud(target_file_path, pcd, write_ascii=True)
     # if success:
     #     print(f"传入点云已成功保存到 {target_file_path}")
@@ -30,7 +30,7 @@ def process_point_cloud(pcd, method):
     print(f"******输入点云数量为 : {num_points}")
 
 
-    # target_file_path_ply = "/home/simplenav/Test_ws/corn.ply"
+    # target_file_path_ply = "/home/fanuc/Test_ws/corn.ply"
     # #保存ply点云到目标路径
     # success = o3d.io.write_point_cloud(target_file_path_ply, pcd)
     # if success:
@@ -71,12 +71,19 @@ def process_point_cloud(pcd, method):
             plane_mesh: Open3D Box对象
         """
         normal = np.array([model[0], model[1], model[2]])
+        normal = normal / np.linalg.norm(normal)  # 单位化目标法向
         # 计算平面法向量的旋转
         initial_normal = np.array([0, 0, 1])  # 初始法向量是 Z 轴方向
         axis = np.cross(initial_normal, normal)  # 旋转轴是初始法向量与目标法向量的叉积
-        axis = axis / np.linalg.norm(axis)  # 归一化旋转轴
-        cos_angle = np.dot(initial_normal, normal)  # 计算夹角的余弦值
-        angle = np.arccos(cos_angle)  # 计算夹角
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm < 1e-8:
+            # normal 与 initial_normal 共线（同向或反向），用任意垂直轴
+            axis = np.array([1.0, 0.0, 0.0])
+            angle = 0.0 if np.dot(initial_normal, normal) > 0 else np.pi
+        else:
+            axis = axis / axis_norm
+            cos_angle = np.clip(np.dot(initial_normal, normal), -1.0, 1.0)
+            angle = np.arccos(cos_angle)
         # 创建一个平面网格
         plane_mesh = o3d.geometry.TriangleMesh.create_box(width=6, height=4, depth=0.001)
         # 计算旋转矩阵
@@ -234,11 +241,16 @@ def process_point_cloud(pcd, method):
     
     start_time = time.time()
     global view
-    view = False
+    view =  True
     view_normal = False
     corner_list = []
     method = method  # 1: 车头波纹板情况；2：I垛面情况; 3: L垛面情况。
     print(f'method: {method}')
+    _FRONT_RIB_MIN = 0.05            # 车头加强筋兜底补偿(m)：筋检测不足时至少前移此距离
+    _FRONT_RIB_MAX = 0.10            # 车头加强筋补偿上限(m)：检测过深时最多前移此距离
+    _RIB_PCT       = 1               # 筋深分位(%)：取最凸向货舱的此分位均值作筋深(越小越激进)
+    _SIDE_PCT      = 10              # 左右壁面分位(%)：取最凸入车厢的此分位均值作壁面位置
+    _GROUND_PCT    = 10              # 地板分位(%)：取最浅(最高 z)的此分位均值作地板上沿位置
     down_pcd = pcd
     if view:
         down_pcd = fiterCloud(down_pcd)
@@ -251,7 +263,7 @@ def process_point_cloud(pcd, method):
 
     # 垛面点云直通滤波
     points = np.asarray(down_pcd.points)
-    x_filtered = (points[:, 0] <= 1.9) & (points[:, 0] >= 0.5)
+    x_filtered = (points[:, 0] <= 2.0) & (points[:, 0] >= 1.0)
     y_filtered = (points[:, 1] <= 2.0) & (points[:, 1] >= -2.0)
     z_filtered = (points[:, 2] <= 1.0) & (points[:, 2] >= -1.0)
     filtered_points = points[x_filtered & y_filtered & z_filtered]
@@ -298,33 +310,43 @@ def process_point_cloud(pcd, method):
         [a, b, c, d], inlier_cloud, outlier_cloud = segment_plane(front_pcd)
         if a < 0:
             a, b, c, d = -a, -b, -c, -d
-        temp_points = np.asarray(outlier_cloud.points)
-        if len(temp_points) != 0:
-            n_main = np.array([a, b, c])
-            n_main = n_main / np.linalg.norm(n_main)
-            distances = temp_points @ n_main + d
-            if method == 1:
-                delta = min(np.percentile(distances, 5), 0)
-            else:
-                delta = min(np.percentile(distances, 50), 0)
-            delta_min = min(np.percentile(distances, 0), 0)
-            i_model = [a, b, c, d - delta]
-            i_model_ = [a, b, c, d - delta_min]
+        rib_points = np.empty((0, 3))
+        if method == 1:
+            # 车头加强筋：用法向滤波后(未经统计滤波删除)的全部前面点，
+            # 取最凸向货舱的 _RIB_PCT% 分位均值作筋深，再夹在 [_FRONT_RIB_MIN, _FRONT_RIB_MAX]
+            n_main = np.array([a, b, c]) / np.linalg.norm([a, b, c])
+            all_dist = front_points @ n_main + d
+            thr = np.percentile(all_dist, _RIB_PCT)
+            rib_points = front_points[all_dist <= thr]   # 被判为筋的最凸 _RIB_PCT% 点
+            delta = float(min(all_dist[all_dist <= thr].mean(), 0))
+            delta_eff = max(-_FRONT_RIB_MAX, min(delta, -_FRONT_RIB_MIN))
+            i_model = [a, b, c, d - delta_eff]
+            print(f'车头筋补偿：检测 delta={delta*1000:.1f}mm, 实际采用={-delta_eff*1000:.1f}mm, '
+                  f'筋点数={len(rib_points)}')
         else:
             i_model = [a, b, c, d]
-            i_model_ = [a, b, c, d]
         if view:
-            front_plane1 = show_plane([a, b, c, d], [1, 0, 0])
             front_plane2 = show_plane(i_model, [0, 1, 0])
-            front_plane3 = show_plane(i_model_, [0, 0, 1])
             vis = o3d.visualization.Visualizer()
             vis.create_window(window_name="Front result", width=800, height=600, left=500, top=200)
             vis.add_geometry(filtered_pcd)
-            vis.add_geometry(front_plane1)
             vis.add_geometry(front_plane2)
-            vis.add_geometry(front_plane3)
             vis.run()
             vis.destroy_window()
+            # 单独弹窗显示被判为筋的点（品红）叠加在原始点云（灰）上
+            if len(rib_points):
+                rib_pcd = o3d.geometry.PointCloud()
+                rib_pcd.points = o3d.utility.Vector3dVector(rib_points)
+                rib_pcd.paint_uniform_color([1, 0, 1])
+                bg = copy.deepcopy(filtered_pcd)
+                bg.paint_uniform_color([0.7, 0.7, 0.7])
+                vis = o3d.visualization.Visualizer()
+                vis.create_window(window_name=f"Rib points (品红, {len(rib_points)}点)",
+                                  width=800, height=600, left=500, top=200)
+                vis.add_geometry(bg)
+                vis.add_geometry(rib_pcd)
+                vis.run()
+                vis.destroy_window()
     elif method == 3:
         flip_mask = normals[:, 0] < 0
         normals[flip_mask] *= -1
@@ -340,11 +362,16 @@ def process_point_cloud(pcd, method):
         front_pcd = o3d.geometry.PointCloud()
         front_pcd.points = o3d.utility.Vector3dVector(front_points)
         front_pcd = fiterCloud(front_pcd)
-        # 滤波结果可视化
+        # 滤波结果可视化：过滤后的前面板点云(红) + 原始点云(灰)背景
         if view:
+            bg = copy.deepcopy(filtered_pcd)
+            bg.paint_uniform_color([0.7, 0.7, 0.7])
+            fg = copy.deepcopy(front_pcd)
+            fg.paint_uniform_color([1, 0, 0])
             vis = o3d.visualization.Visualizer()
             vis.create_window(window_name="Front filtered", width=800, height=600)
-            vis.add_geometry(front_pcd)
+            vis.add_geometry(bg)
+            vis.add_geometry(fg)
             vis.run()
             vis.destroy_window()
         l_model, i_model = clustFrontBoard(front_pcd)
@@ -381,24 +408,24 @@ def process_point_cloud(pcd, method):
     normals = np.asarray(filtered_pcd.normals)
     target_normal = np.array([0, 1, 0])
     cos_theta = np.dot(normals, target_normal)
-    angle_threshold = np.cos(np.radians(45))
-    if method == 1:
-        x_threshold = -i_model[3] - 0.1
-    else:
-        x_threshold = -i_model[3] - 0.05
-    z_threshold = -0.7
-    x_threshold_ = 1.0
-    mask = (cos_theta > angle_threshold) & (points[:, 0] < x_threshold) & (points[:, 0] > x_threshold_) & (points[:, 2] > z_threshold)
+    angle_threshold = np.cos(np.radians(10))
+    x_threshold = -i_model[3] - 0.05
+    z_threshold = -0.5
+    mask = (cos_theta > angle_threshold) & ((-i_model[3]-0.6) < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
     left_points = np.asarray(filtered_pcd.points)[mask]
     left_pcd = o3d.geometry.PointCloud()
     left_pcd.points = o3d.utility.Vector3dVector(left_points)
     left_pcd = fiterCloud(left_pcd)
-    left_points = np.asarray(left_pcd.points)
-    # 可视化滤波后的点云
+    # 可视化滤波后的点云（红）叠加在原始点云（灰）上
     if view:
+        bg = copy.deepcopy(filtered_pcd)
+        bg.paint_uniform_color([0.7, 0.7, 0.7])
+        fg = copy.deepcopy(left_pcd)
+        fg.paint_uniform_color([1, 0, 0])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="left_pcd", width=800, height=600, left=500, top=200)
-        vis.add_geometry(left_pcd)
+        vis.add_geometry(bg)
+        vis.add_geometry(fg)
         vis.run()
         vis.destroy_window()
     [a, b, c, d], inlier_cloud, outlier_cloud = segment_plane(left_pcd)
@@ -406,36 +433,20 @@ def process_point_cloud(pcd, method):
         a, b, c, d = -a, -b, -c, -d
     temp_points = np.asarray(outlier_cloud.points)
     if len(temp_points) != 0:
-        # n_main = np.array([a, b, c])
         n_main = np.array([0, 1, 0])
-        n_main = n_main / np.linalg.norm(n_main)
-        # 计算所有点到主平面的有符号距离
-        # distances = temp_points @ n_main + d
         distances = left_points @ n_main
-        # distances = distances[distances < 0]
         distances = distances[distances > 0]
-        # delta = max(min(np.percentile(distances, 40), 0), -0.05)
-        delta = np.percentile(distances, 5) # 调整左侧
-        # delta_min = min(np.percentile(distances, 0), 0)
-        delta_min = np.percentile(distances, 0)
-        # side_left_model = [a, b, c, d - delta]
-        side_left_model = [0, 1, 0, - delta]
-        # side_left_model = [a, b, c, d]
-        # side_left_model_ = [a, b, c, d - delta_min]
-        side_left_model_ = [0, 1, 0, - delta_min]
+        thr_l = np.percentile(distances, _SIDE_PCT)
+        delta = float(distances[distances <= thr_l].mean())
+        side_left_model = [0, 1, 0, -delta]
     else:
         side_left_model = [a, b, c, d]
-        side_left_model_ = [a, b, c, d]
     if view:
-        side_l_plane1 = show_plane([a, b, c, d], [1, 0, 0])
         side_l_plane2 = show_plane(side_left_model, [0, 1, 0])
-        side_l_plane3 = show_plane(side_left_model_, [0, 0, 1])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="side_left", width=800, height=600, left=500, top=200)
         vis.add_geometry(filtered_pcd)
-        vis.add_geometry(side_l_plane1)
         vis.add_geometry(side_l_plane2)
-        vis.add_geometry(side_l_plane3)
         vis.run()
         vis.destroy_window()
 
@@ -444,21 +455,25 @@ def process_point_cloud(pcd, method):
         o3d.visualization.draw_geometries([filtered_pcd], point_show_normal=True)
     target_normal = np.array([0, -1, 0])
     cos_theta = np.dot(normals, target_normal)
-    angle_threshold = np.cos(np.radians(45))
+    angle_threshold = np.cos(np.radians(10))
     # right_indices = np.where(cos_theta > angle_threshold)[0]
-    x_threshold = -i_model[3]-0.05 if method != 3 else -l_model[3]
-    z_threshold = -0.7
-    mask = (cos_theta > angle_threshold) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
+    x_threshold = -i_model[3]-0.05 if method != 3 else -l_model[3]-0.05
+    z_threshold = -0.5
+    mask = (cos_theta > angle_threshold) & ((-i_model[3]-0.6) < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
     right_points = np.asarray(filtered_pcd.points)[mask]
     right_pcd = o3d.geometry.PointCloud()
     right_pcd.points = o3d.utility.Vector3dVector(right_points)
     right_pcd = fiterCloud(right_pcd)
-    right_points = np.asarray(right_pcd.points)
-    # 可视化滤波后的点云
+    # 可视化滤波后的点云（红）叠加在原始点云（灰）上
     if view:
+        bg = copy.deepcopy(filtered_pcd)
+        bg.paint_uniform_color([0.7, 0.7, 0.7])
+        fg = copy.deepcopy(right_pcd)
+        fg.paint_uniform_color([1, 0, 0])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="side_right", width=800, height=600, left=500, top=200)
-        vis.add_geometry(right_pcd)
+        vis.add_geometry(bg)
+        vis.add_geometry(fg)
         vis.run()
         vis.destroy_window()
     [a, b, c, d], inlier_cloud, outlier_cloud = segment_plane(right_pcd)
@@ -466,34 +481,19 @@ def process_point_cloud(pcd, method):
         a, b, c, d = -a, -b, -c, -d
     temp_points = np.asarray(outlier_cloud.points)
     if len(temp_points) != 0:
-        # n_main = np.array([a, b, c])
         n_main = np.array([0, -1, 0])
-        n_main = n_main / np.linalg.norm(n_main)
-        # 计算所有点到主平面的有符号距离
-        # distances = temp_points @ n_main + d
         distances = right_points @ n_main
-        # delta = min(np.percentile(distances, 5), 0)
-        delta = np.percentile(distances, 10)
-        # delta_min = min(np.percentile(distances, 0), 0)
-        delta_min = np.percentile(distances, 0)
-        # side_right_model = [a, b, c, d - delta]
+        thr_r = np.percentile(distances, _SIDE_PCT)
+        delta = float(distances[distances <= thr_r].mean())
         side_right_model = [0, -1, 0, -delta]
-        # side_right_model = [a, b, c, d]
-        # side_right_model_ = [a, b, c, d - delta_min]
-        side_right_model_ = [0, -1 ,0, -delta_min]
     else:
         side_right_model = [a, b, c, d]
-        side_right_model_ = [a, b, c, d]
     if view:
-        side_r_plane1 = show_plane([a, b, c, d], [1, 0, 0])
         side_r_plane2 = show_plane(side_right_model, [0, 1, 0])
-        side_r_plane3 = show_plane(side_right_model_, [0, 0, 1])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="side_right", width=800, height=600, left=500, top=200)
         vis.add_geometry(filtered_pcd)
-        vis.add_geometry(side_r_plane1)
         vis.add_geometry(side_r_plane2)
-        vis.add_geometry(side_r_plane3)
         vis.run()
         vis.destroy_window()
 
@@ -506,37 +506,41 @@ def process_point_cloud(pcd, method):
     normals = np.asarray(filtered_pcd.normals)
     target_normal = np.array([0, 0, -1])
     cos_theta = np.dot(normals, target_normal)
-    angle_threshold = np.cos(np.radians(10))
+    angle_threshold = np.cos(np.radians(30))
     ground_indices = np.where(cos_theta > angle_threshold)[0]
     ground_points = np.asarray(filtered_pcd.points)[ground_indices]
-    ground_points = ground_points[(ground_points[:, 2] < -0.7) & (ground_points[:, 0] > 1.0)]
+    ground_points = ground_points[(ground_points[:, 2] < -0.5) & (ground_points[:, 0] > 1.0)]
     ground_pcd = o3d.geometry.PointCloud()
     ground_pcd.points = o3d.utility.Vector3dVector(ground_points)
     # ground_pcd = fiterCloud(ground_pcd)
-    # 可视化滤波后的点云
+    # 可视化滤波后的点云（红）叠加在原始点云（灰）上
     if view:
+        bg = copy.deepcopy(filtered_pcd)
+        bg.paint_uniform_color([0.7, 0.7, 0.7])
+        fg = copy.deepcopy(ground_pcd)
+        fg.paint_uniform_color([1, 0, 0])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="ground_pcd", width=800, height=600, left=500, top=200)
-        vis.add_geometry(ground_pcd)
+        vis.add_geometry(bg)
+        vis.add_geometry(fg)
         vis.run()
         vis.destroy_window()
     [a, b, c, d], ground_inliers, ground_outliers = segment_plane(ground_pcd)
     if c > 0:
         a, b, c, d = -a, -b, -c, -d
-    # # 获取底面点云
+    # 固定法向 [0, 0, -1]（指向下方，朝雷达反方向）。
+    # distances = ground_points @ [0,0,-1] = -z，地板点 z<0 故 distances>0；
+    # 取最小 10% 的均值 = 地板最浅处（最高 z 那批，对应表面起伏的上沿）
     temp_points = np.asarray(ground_outliers.points)
     if len(temp_points) != 0:
-        n_main = np.array([a, b, c])
-        n_main = n_main / np.linalg.norm(n_main)
-        # 计算所有点到主平面的有符号距离
-        distances = temp_points @ n_main + d
-        delta = min(np.percentile(distances, 10), 0)
-        delta_min = min(np.percentile(distances, 0), 0)
-        ground_model = [a, b, c, d - delta]
-        ground_model_ = [a, b, c, d - delta_min]
+        n_main = np.array([0, 0, -1])
+        distances = ground_points @ n_main
+        distances = distances[distances > 0]
+        thr_g = np.percentile(distances, _GROUND_PCT)
+        delta = float(distances[distances <= thr_g].mean())
+        ground_model = [0, 0, -1, -delta]
     else:
         ground_model = [a, b, c, d]
-        ground_model_ = [a, b, c, d]
     # 校验底面法线
     v1 = np.array([i_model[0], i_model[1], i_model[2]])
     v2 = np.array([side_left_model[0], side_left_model[1], side_left_model[2]])
@@ -555,19 +559,17 @@ def process_point_cloud(pcd, method):
     #     raise Exception(f"地面法线夹角: {angle_with_plane_deg:.2f}, "
     #                     f"地面凸起： {np.max(filtered_points[:, 2]) + ground_model[3]:.2f}, 请检查具体情况")
     if view:
-        ground_plane = show_plane(ground_model, [1, 0, 0])
-        ground_plane_ = show_plane(ground_model_, [0, 0, 1])
+        ground_plane = show_plane(ground_model, [0, 1, 0])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="Ground result", width=800, height=600, left=500, top=200)
         vis.add_geometry(filtered_pcd)
         vis.add_geometry(ground_plane)
-        vis.add_geometry(ground_plane_)
         vis.run()
         vis.destroy_window()
 
-    lid2base_m = np.array([[0.999, -0.011, -0.021, 352.101],
-                           [0.011, 0.999, 0.000, -561.688],
-                           [0.021, 0.000, 0.999, -392.580],
+    lid2base_m = np.array([[-0.018, -0.999, -0.004, 266.14],
+                           [0.999, -0.018, 0, 428.673],
+                           [0.000, -0.004, 1, -738.086],
                            [0.000, 0.000, 0.000, 1.000]])
 
     if method == 2 or method == 1:
@@ -596,8 +598,7 @@ def process_point_cloud(pcd, method):
         else:
             o_re = o_be
         # corner_point1[0] = min(corner_point1[0], corner_point2[0])
-        if method == 1:
-            corner_point1[0] -= 0.08
+        # 车头加强筋补偿已并入 i_model（前平面前移），此处不再额外偏移角点
         a_re = [-ground_model[0], -ground_model[1], -ground_model[2]]
         n_re = np.cross(o_re, a_re)
         corner_point1_m = np.array([[n_re[0], o_re[0], a_re[0], corner_point1[0] * 1000],
@@ -614,17 +615,20 @@ def process_point_cloud(pcd, method):
         point2_m = lid2base_m @ corner_point2_m
         point1 = matrix2euler(point1_m)
         point2 = matrix2euler(point2_m)
+        point1[3] = corner_point1[1]
+        point2[3] = corner_point2[1]
         corner_list.append(point1)
         corner_list.append(point2)
         print(f'corner1 in lidar: x: {corner_point1[0] * 1000:.3f}, '
               f'y: {corner_point1[1] * 1000:.3f}, '
               f'z: {corner_point1[2] * 1000:.3f}')
-        print(f'corner1 in robot base: x: {point1[0]:.3f}, y: {point1[1]:.3f}, z: {point1[2]:.3f}, '
-              f'rx: {point1[3]:.3f}, ry: {point1[4]:.3f}, rz: {point1[5]:.3f}')
+        print(f'corner1 in robot base: x: {point1[0]:.3f}, y: {point1[1]:.3f}, z: {point1[2]:.3f},'
+              f'rx: {point1[3] * 1000:.3f}, ry: {point1[4]:.3f}, rz: {point1[5]:.3f}')
         print(f'corner2 in lidar: x: {corner_point2[0] * 1000:.3f},'
               f'y: {corner_point2[1] * 1000:.3f},'
               f'z: {corner_point2[2] * 1000:.3f}')
-        print(f'corner2 in robot base: x: {point2[0]:.3f}, y: {point2[1]:.3f}, z: {point2[2]:.3f}')
+        print(f'corner2 in robot base: x: {point2[0]:.3f}, y: {point2[1]:.3f}, z: {point2[2]:.3f},'
+              f'rx: {point2[3] * 1000:.3f}, ry: {point2[4]:.3f}, rz: {point2[5]:.3f}')
         if view:
             vis = o3d.visualization.Visualizer()
             vis.create_window(window_name="Two corner result", width=800, height=600, left=500, top=200)
@@ -718,6 +722,6 @@ def process_point_cloud(pcd, method):
     print(f'cost time: {(end_time - start_time):.2f}')
     return corner_list
 
-# file_path = "/home/fanuc/data_nav/carriage/trun_cloud_20250821_093142.pcd"
-# pcd = o3d.io.read_point_cloud(file_path)
-# process_point_cloud(pcd, 2)
+file_path = "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/pcd_logs/trun_cloud_20260618_140655.pcd"
+pcd = o3d.io.read_point_cloud(file_path)
+process_point_cloud(pcd, 1)

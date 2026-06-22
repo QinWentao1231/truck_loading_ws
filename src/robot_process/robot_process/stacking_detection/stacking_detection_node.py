@@ -12,7 +12,7 @@ import numpy as np
 
 # 调试模式开关：True 才向终端打印运行日志（测量宽度、保存路径等）
 # 离线测试入口 __main__ 内会自动置 True
-DEBUG = True
+DEBUG = False
 
 def _dbg(msg):
     if DEBUG:
@@ -29,29 +29,31 @@ LIDAR_TIMEOUT_SEC = 5.0          # 采集超时(秒)：topic 未发布/帧数不
 # ── 直通滤波范围(米)：从合并点云裁出一个 y 切片用于测宽 ──
 PASS_X = (-2.0, 2.0)             # 宽度方向(x)保留范围
 PASS_Y = (-2.0, -1.0)            # 深度方向(y)保留范围 = 测宽切片位置
-PASS_Z = (-2.0, 2.0)             # 高度方向(z)保留范围
+PASS_Z = (-1.5, 2.0)             # 高度方向(z)保留范围(宽松；顶部薄片噪声由 MIN_CLUSTER_ZSPAN_M 过滤)
 PASS_MIN_PTS = 10                # 直通后最少点数，不足则报错
 
 # ── 法向量滤波：保留法向接近 ±x 的侧面点 ──
 NORMAL_KNN = 30                  # 法向估计的近邻点数
-NORMAL_ANGLE_DEG = 30            # 法向与 x 轴夹角阈值(度)，小于此保留为侧面点
+NORMAL_ANGLE_DEG = 20            # 法向与 x 轴夹角阈值(度)：20° 能抓到第一层箱面残余侧面点(10°漏掉)
 
 # ── DBSCAN 聚类 ──
-DBSCAN_EPS = 0.05                # 邻域半径(米)
-DBSCAN_MIN_POINTS = 10           # 成簇最少点数
+DBSCAN_EPS = 0.2                 # 邻域半径(米)：0.2 能合并车厢壁的 z 方向缝隙，又不混入箱面
+DBSCAN_MIN_POINTS = 10           # 成簇最少点数：10 能抓住极稀疏的第一层箱面(20-80点级别)
 
 # ── 簇筛选与左右配对 ──
-MIN_CLUSTER_PTS = 200            # 簇最小点数，不足视为噪声丢弃
+MIN_CLUSTER_PTS = 20             # 簇最小点数：20 能保住稀疏箱面，又能过滤孤立噪点
+MIN_CLUSTER_ZSPAN_M = 0.10       # 簇最小 z 跨度(米)：0.10 过滤顶部薄片(<0.08)，保住稀疏第一层(0.1-0.4)
+MAX_CLUSTER_CZ_M = 1.0           # 簇 z 重心上限(米)：> 此值视为车厢顶部凸起结构(管线/灯)，丢弃
 MIN_VALID_WIDTH_MM = 500         # 测宽下限(mm)，小于此判为货物窄缝 → 向外重选
 MAX_Z_DIFF_M = 0.15              # 两箱面 z 重心最大高度差(米)，超出判为跨层(仅两侧都是箱面时校验)
-WALL_PTS = 2000                  # 簇点数 ≥ 此判为墙，跳过 z 重心校验(箱↔墙高度本就不同)
+WALL_PTS = 1000                  # 簇点数 ≥ 此判为墙，跳过 z 重心校验(单侧壁合并后约 1200 点)
 FACE_PCT = 10                    # 取簇内侧面 FACE_PCT% 的点求面位置(抗噪)
 
 # ── 偏航补偿（雷达绕机器人 J1 轴摆动）──
 # 拍照位 J1 与正对 J1 不同 → 点云绕 J1 轴偏航，需转回正对系再测量。
 # J1 轴在雷达坐标系的水平位置(ax,ay)和旋转方向由"双角度同场景"标定确定。
-J1_AXIS_XY = None                # J1 轴水平位置 (ax, ay) 米；None=未标定，不补偿
-J1_DEROTATE_SIGN = 1             # 补偿旋转方向(+1/-1)，标定时确定
+J1_AXIS_XY = (0.269, 0.506)      # J1 轴水平位置 (ax, ay) 米；由车厢场景 5 个 J1 角度(-40.5~-80.5° 跨度40°)联合标定，残差中位数 12mm
+J1_DEROTATE_SIGN = 1             # 补偿旋转方向：雷达系绕 J1 轴的旋转角 = θ_photo - θ_face = +yaw_offset_deg
 
 # ── 可视化 ──
 VIEW = True                     # 可视化总开关：True 才弹出各阶段点云窗口(原始/法向/聚类/拟合)
@@ -509,7 +511,11 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
     if view:
         # 原始点云(灰) + 直通框选中部分(绿)，直观看裁剪框相对整体的位置
         # 仅显示用裁剪：车厢长轴(y)太长，只显示雷达前方 VIEW_FRONT_Y 米内的点
-        front = pts[(pts[:, 1] >= -VIEW_FRONT_Y) & (pts[:, 1] <= 0.5)]
+        # 在 PASS 范围外留 1m 余量，再裁掉车厢外明显远点的反射噪声（不影响计算，只清理可视化）
+        view_margin = 1.0
+        front = pts[(pts[:, 1] >= -VIEW_FRONT_Y) & (pts[:, 1] <= 0.5) &
+                    (pts[:, 0] >= PASS_X[0] - view_margin) & (pts[:, 0] <= PASS_X[1] + view_margin) &
+                    (pts[:, 2] >= PASS_Z[0] - view_margin) & (pts[:, 2] <= PASS_Z[1] + view_margin)]
         raw = o3d.geometry.PointCloud()
         raw.points = o3d.utility.Vector3dVector(front)
         raw.paint_uniform_color([0.6, 0.6, 0.6])
@@ -561,6 +567,15 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         for k in range(n_clusters):
             colors[labels == k] = cluster_colors[k]
         sp_pcd.colors = o3d.utility.Vector3dVector(colors)
+        # 打印各簇颜色 + 统计，便于在窗口里对照颜色定位
+        _dbg(f"聚类结果 {n_clusters} 个簇（噪点={int((labels == -1).sum())}）：")
+        for k in range(n_clusters):
+            kp = side_pts[labels == k]
+            r, g, b = cluster_colors[k]
+            hex_c = f'#{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}'
+            _dbg(f"  k={k:2d} 颜色={hex_c} RGB=({r:.2f},{g:.2f},{b:.2f}) "
+                 f"点数={len(kp):5d} cx={kp[:,0].mean():+.3f} cz={kp[:,2].mean():+.3f} "
+                 f"zspan={float(kp[:,2].max()-kp[:,2].min()):.2f}")
         bg1 = o3d.geometry.PointCloud()
         bg1.points = o3d.utility.Vector3dVector(pts)
         bg1.paint_uniform_color([0.5, 0.5, 0.5])
@@ -572,11 +587,22 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         vis.destroy_window()
 
     # ── 4. 按 x 重心选左右两簇（各侧取最靠近原点的簇）──────────────────────
-    # 点数不足 MIN_CLUSTER_PTS 的簇视为噪声，不参与左右候选
+    # 过滤规则：
+    #   - 点数不足 MIN_CLUSTER_PTS → 噪点
+    #   - z 跨度不足 MIN_CLUSTER_ZSPAN_M → 顶部薄片(灯/横梁/手柄)，过滤
+    #   - z 重心 > MAX_CLUSTER_CZ_M → 车厢顶部凸起结构(管线/灯具)，过滤
     left_candidates, right_candidates = [], []
     for k in range(n_clusters):
         kpts = side_pts[labels == k]
         if len(kpts) < MIN_CLUSTER_PTS:
+            continue
+        zspan = float(kpts[:, 2].max() - kpts[:, 2].min())
+        if zspan < MIN_CLUSTER_ZSPAN_M:
+            _dbg(f"簇 k={k} 被过滤（zspan={zspan*100:.1f}cm < {MIN_CLUSTER_ZSPAN_M*100:.0f}cm，疑似顶部薄片）")
+            continue
+        cz = float(kpts[:, 2].mean())
+        if cz > MAX_CLUSTER_CZ_M:
+            _dbg(f"簇 k={k} 被过滤（cz={cz:.2f}m > {MAX_CLUSTER_CZ_M:.1f}m，疑似车厢顶部凸起）")
             continue
         cx = float(kpts[:, 0].mean())
         (left_candidates if cx < 0 else right_candidates).append((cx, k))
@@ -657,9 +683,9 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         bg2.points = o3d.utility.Vector3dVector(pts)
         bg2.paint_uniform_color([0.5, 0.5, 0.5])
         vis = o3d.visualization.Visualizer()
-        vis.create_window(
-            window_name=f"拟合平面  左(橙)={x_left_face:.3f}m  右(绿)={x_right_face:.3f}m  宽={gap_mm}mm",
-            width=1000, height=700)
+        win_name = (f"拟合平面  面A(橙)={x_left_face:.3f}m  "
+                    f"面B(绿)={x_right_face:.3f}m  宽={gap_mm}mm")
+        vis.create_window(window_name=win_name, width=1000, height=700)
         for g in [bg2, left_plane_mesh, right_plane_mesh]:
             vis.add_geometry(g)
         vis.run()
@@ -717,7 +743,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260516_143347.pcd'
+    _FILENAME = 'merged_20260618_141830.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -741,7 +767,7 @@ if __name__ == '__main__':
     print(f'加载点云：{pcd_path}  点数={len(pcd.points)}')
 
     empty = o3d.geometry.PointCloud()
-    measured = _compute_width(pcd, empty)   # view 跟随顶部 VIEW 开关
+    measured = _compute_width(pcd, empty,yaw_offset_deg=4)   # view 跟随顶部 VIEW 开关
     print(f'\n测量宽度: {measured} mm')
 
     if len(args) >= 2:
