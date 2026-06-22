@@ -1,0 +1,12 @@
+# robot_process 第三方依赖（pip 安装）
+# 注：ROS 包（rclpy / sensor_msgs / sensor_msgs_py / ament_index_python）由 ROS2 环境提供，
+#     不在此列；rrt_planning 为包内本地模块，亦不在此列。
+# 安装：pip install -r requirements.txt
+
+numpy>=1.26.4          # 数值计算（垛序/碰撞/点云）
+open3d>=0.19.0         # 点云处理（堆叠检测 stacking_detection、车厢宽度检测）
+plotly>=5.15.0         # show_env 码垛路径可视化（HTML）
+Rtree>=1.0.1           # SearchSpace 碰撞检测的空间索引
+colorlog>=6.7.0        # 终端彩色日志
+grpcio>=1.80.0         # 在线接收垛型数据（gRPC 服务端）
+protobuf>=6.33.6       # gRPC 消息编解码

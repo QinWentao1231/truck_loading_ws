@@ -1,0 +1,31 @@
+# ── ROS2 / colcon 生成物（可重建，勿入库）──
+build/
+install/
+log/
+
+# ── Python 缓存 ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+
+# ── 虚拟环境 ──
+venv/
+.venv/
+env/
+
+# ── 点云数据（体积大、可重新采集/生成）──
+*.pcd
+test_data/
+# 若需保留某些样例点云：git add -f <文件>
+
+# ── 断点续传运行时文件（在 log/ 下，已忽略；保险再列）──
+resume_plan.json
+resume_cursor.json
+
+# ── 操作系统 / 编辑器 ──
+.DS_Store
+*.swp
+*~
+.idea/

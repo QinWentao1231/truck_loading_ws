@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+// 求解结果总包
+message Answer{
+    repeated Block blocks = 1; // 堆垛队列
+    Index index = 2; // 全局统计参数
+    SpecialInd sInd = 3; // P1P3来料特殊翻转信息
+}
+
+// 堆垛信息(同一堆垛中仅包含一种垛型，其余两种队列为空)
+message Block{
+    int32 queueId = 1; // 队列中序号
+    string orderId = 2; // 对应子订单号
+    repeated Regular regular = 3; // 规整垛
+    repeated Mixture mixture = 4; // 混装面
+    repeated Trapezoid trapezoid = 5; // 梯形尾垛
+}
+
+// 规整垛
+message Regular{
+    int32 N1 = 1; // P1每行个数
+    int32 N2 = 2; // P2每行个数
+    int32 N3 = 3; // P3每行个数
+    int32 T12 = 4; // P1P2高度行数
+    int32 T3 = 5; // P3高度行数
+    int32 F13 = 6; // P1P3面数
+    int32 F2 = 7; // P2面数
+    int32 E = 8; // 尾料堆放形式(0 无，1 P1前置，2 P3顶置)
+    int32 Nx = 9; // 尾料个数
+    repeated Stack Stack = 10; // 堆叠缝隙排布
+    repeated Group Group = 11; // 堆叠按爪分组
+    string Type = 12; // 箱型代号
+}
+
+// 混装面(面数固定为1，全P1堆放，下方箱体为前垛收尾，上方箱体为后垛开头)
+message Mixture{
+    int32 NA = 1; // 下方箱体每行个数
+    int32 TA = 2; // 下方箱体高度行数
+    repeated Stack StackA = 3; // 下方箱体堆叠缝隙排布
+    repeated Group GroupA = 4; // 下方箱体堆叠按爪分组
+    string TypeA = 5; // 下方箱体箱型代号
+    int32 NB = 6; // 上方箱体每行个数
+    int32 Tb = 7; // 上方箱体高度行数
+    repeated Stack StackB = 8; // 上方箱体堆叠缝隙排布
+    repeated Group GroupB = 9; // 上方箱体堆叠按爪分组
+    string TypeB = 10; // 上方箱体箱型代号
+}
+
+// 梯形尾垛(面数固定为1，下方P1堆放，上方P3堆放，如有尾料以P3顶置形式堆放)
+message Trapezoid{
+    int32 N1 = 1; // P1每行个数
+    int32 N3 = 2; // P3每行个数
+    int32 T1 = 3; // P1高度行数
+    int32 T3 = 4; // P3高度行数
+    int32 Nx = 5; // 尾料个数
+    repeated Stack Stack = 6; // 堆叠缝隙排布
+    repeated Group Group = 7; // 堆叠按爪分组
+    bool Isdoor = 8; // 是否需要尾门变形
+    string Type = 9; // 箱型代号
+}
+
+// 堆叠缝隙排布
+message Stack{
+    repeated int32 Width = 1; // 从左至右每个箱体与箱体或墙面间的缝隙宽度，百分比表示，仅表示P1P2整行
+}
+
+// 堆叠按爪分组
+message Group{
+    repeated int32 Unit = 1; // 从左至右每爪箱体数量分组，仅表示行内所有P1箱体
+}
+
+// 全局统计参数(暂定)
+message Index{
+    int32 Ns = 1; // 整车总箱数
+    float Us = 2; // 整车总空间装载率
+    float Um = 3; // 总外接长方体装载率
+    repeated int32 Gn = 4; // P1P2P3总抓数
+    float Tp = 5; // 预估总码垛时长
+}
+
+// P1P3来料特殊翻转信息(PLC通知用)
+message SpecialInd{
+    int32 Nt = 1; // 整车总箱数
+    repeated string BoxType = 2; // 全车垛型箱型顺序
+    repeated int32 BoxNum = 3; // 全车垛型各箱型个数
+    int32 BoxP3Sum = 4; // P3不翻转总数
+    repeated int32 BoxP3IndNum = 5; // 各垛P3不翻转个数
+    repeated int32 BoxP3Ind = 6; // P3不翻转序号
+    int32 BoxP1RightSum = 7; // P1右翻总数
+    repeated int32 BoxP1RightIndNum = 8; // 各垛P1右翻个数
+    repeated int32 BoxP1RightInd = 9; // P1右翻序号
+}
+
+// 订单条件总包
+message Condition{
+    CarCondition car = 1; // 车辆条件
+    repeated OrderCondition orders = 2; // 子订单条件
+    Limitation limit = 3; // 订单限制
+}
+
+// 车辆条件
+message CarCondition{
+    string type = 1; // 车型代号
+    Size original = 2; // 车辆原始尺寸
+    Size reserve = 3; // 安全运行冗余尺寸
+    Size frame = 4; // 尾门门框尺寸
+}
+
+// 尺寸参数
+message Size{
+    float L = 1; // 长度
+    float W = 2; // 宽度
+    float H = 3; // 高度
+}
+
+// 子订单条件
+message OrderCondition{
+    string orderId = 1; // 子订单号
+    repeated BoxCondition boxes = 2; // 箱型信息
+}
+
+// 箱型信息
+message BoxCondition{
+    string type = 1; // 箱型代号
+    Size original = 2; // 箱型原始尺寸
+    Size reserve = 3; // 箱型冗余尺寸
+    Grip grip = 4; // 抓取参数
+    int32 Nt = 5; // 总个数
+}
+
+// 抓取参数(单抓个数和单次抓取时间)
+message Grip{
+    repeated int32 P1 = 1; // P1抓取参数
+    repeated int32 P2 = 2; // P2抓取参数
+    repeated int32 P3 = 3; // P3抓取参数
+}
+
+// 订单限制
+message Limitation{
+    int32 N1min = 1; // 每行P1个数下限
+    int32 T3max = 2; // P3高度行数上限
+    int32 N2max = 3; // 每行P2个数上限
+    int32 T12min = 4; // P1P2高度行数下限
+    repeated int32 Elim = 5; // 尾料形态可选限制
+    bool Istrapezoid = 6; // 梯形尾垛开关
+    int32 Strategy = 7; // 垛型生成策略偏重
+    int32 P1P2gap = 8; // P1P2箱间隙(暂定)
+    int32 G = 9; // 重心裕量(暂定)
+    int32 Tback = 10; // 垛型每面间隙冗余
+    repeated int32 Overlap = 11; // 堆叠缝隙尺寸
+}
+
+service Issuer {
+  rpc Issue (IssueRequest) returns (IssueReply) {}
+}
+
+message IssueRequest {
+    Condition condition = 1;
+    Answer answer = 2;
+}
+
+message IssueReply {
+    bool result = 1;
+    string message = 2;
+}
+
+

@@ -1,0 +1,23 @@
+{
+  "station_interval_m": 3.0,
+  "long_axis": "y",
+  "width_axis": "x",
+  "long_axis_sign": 1.0,
+  "slice_step_m": 0.5,
+  "slice_range_m": [],
+  "center_x_m": null,
+  "z_band_m": [],
+  "face_percentile": 5.0,
+  "min_pts_per_slice": 200,
+  "max_spread_mm": 60.0,
+  "region_tol_mm": 15.0,
+  "use_icp_refine": false,
+  "icp_max_corr": 0.1,
+  "topic1": "/lidar_points1",
+  "topic2": "/lidar_points2",
+  "cabin_frame": "cabin",
+  "cloud_topic": "/cabin/cloud",
+  "marker_topic": "/cabin/markers",
+  "republish_period_s": 1.0,
+  "offline_pcd_dir": ""
+}

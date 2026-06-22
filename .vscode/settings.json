@@ -1,0 +1,9 @@
+{
+  "python.defaultInterpreterPath": "/home/qinwentao/workcells/venv/bin/python",
+  "python.analysis.extraPaths": [
+    "src/cabin_width_check",
+    "src/robot_process/robot_process",
+    "/opt/ros/jazzy/lib/python3.12/site-packages",
+    "/opt/ros/jazzy/local/lib/python3.12/dist-packages"
+  ]
+}

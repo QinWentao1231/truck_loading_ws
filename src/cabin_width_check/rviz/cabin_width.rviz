@@ -1,0 +1,50 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: true
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane Cell Count: 40
+      Reference Frame: cabin
+    - Class: rviz_default_plugins/PointCloud2
+      Name: CabinCloud
+      Enabled: true
+      Topic:
+        Value: /cabin/cloud
+        Depth: 5
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: RGB8
+      Decay Time: 0
+    - Class: rviz_default_plugins/MarkerArray
+      Name: WidthMarkers
+      Enabled: true
+      Topic:
+        Value: /cabin/markers
+        Depth: 5
+        Reliability Policy: Reliable
+  Global Options:
+    Fixed Frame: cabin
+    Background Color: 48; 48; 48
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 20
+      Focal Point:
+        X: 0
+        Y: 8
+        Z: 0
+      Pitch: 1.2
+      Yaw: 1.57
+Window Geometry:
+  Height: 800
+  Width: 1200
