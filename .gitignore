@@ -29,3 +29,6 @@ resume_cursor.json
 *.swp
 *~
 .idea/
+
+# 跳过功能包
+/src/web_scraper/

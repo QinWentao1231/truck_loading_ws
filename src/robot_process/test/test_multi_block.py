@@ -50,7 +50,7 @@ def make_block(box_type, box_w, n1, grab, t12, f13, car_w=4000):
             'Group': group,
         }],
         'trapezoid': [],
-        'head': [],
+        'mixture': [],
     }
 
 
@@ -155,7 +155,7 @@ cfg_gap = {
     'regular': [{'N1': N1, 'N2': 0, 'N3': 0, 'T12': 1, 'T3': 0,
                  'F13': 1, 'F2': 0, 'E': 0, 'Nx': 0,
                  'Stack': stack_gap, 'Group': group_gap}],
-    'trapezoid': [], 'head': [],
+    'trapezoid': [], 'mixture': [],
 }
 rp_gap = RobotPosition(cfg_gap)
 real_offsets = [a for a in rp_gap.robot_offsets if a != 'done']

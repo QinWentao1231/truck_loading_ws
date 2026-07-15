@@ -27,13 +27,14 @@ class Box:
 
 
 class RobotPosition:
-    """单个 block 的垛型解析器。block 类型互斥：regular / trapezoid / mixture / head，
-    仅对应字段会被读取和解析（mixture、head 暂未实现）。"""
+    """单个 block 的垛型解析器。block 类型互斥：regular / trapezoid / mixture，
+    仅对应字段会被读取和解析。"""
 
     def __init__(self, config_data):
         # box
+        self.box_configs = config_data['box']
         self.box_type = config_data['box_list'][0]
-        box_cfg = config_data['box'][self.box_type]
+        box_cfg = self.box_configs[self.box_type]
         rsv = box_cfg.get('reserve', {})
         self.l = box_cfg['size']['L'] + rsv.get('L', 0)
         self.w = box_cfg['size']['W'] + rsv.get('W', 0)
@@ -51,7 +52,6 @@ class RobotPosition:
         self.RW = round(config_data['car']['reserve']['W'])
 
         # block 类型与对应字段（互斥）
-        self.head      = config_data.get('head',      []) or []
         self.regular   = config_data.get('regular',   []) or []
         self.trapezoid = config_data.get('trapezoid', []) or []
         self.mixture   = config_data.get('mixture',   []) or []
@@ -88,7 +88,9 @@ class RobotPosition:
             sum(r['N1'] * r['T12'] * r['F13'] + r['N2'] * r['T12'] * r['F2']
                 + r['N3'] * r['T3'] * r['F13'] + r['Nx'] for r in self.regular)
             + sum(x['N1'] * x['T1'] + x['N3'] * x['T3'] + x['Nx'] for x in self.trapezoid)
-            + sum(y['N1'] * y['T1'] + y['N3'] * y['T3'] + y['Nx'] for y in self.head))
+            + sum(y.get('NA', y.get('N1', 0)) * y.get('TA', y.get('T1', 0))
+                  + y.get('NB', y.get('N3', 0)) * y.get('Tb', y.get('T3', 0))
+                  for y in self.mixture))
 
         # robot_offsets: 运行时抓取队列；ori_offsets: 完整快照（间隙计算用）
         # boxes: 来料配方队列（与robot_offsets一一对应，供cmd_get_box消费）
@@ -103,8 +105,6 @@ class RobotPosition:
 
     def _detect_block_type(self):
         """block 类型互斥：按优先级返回唯一命中的类型。"""
-        if self.head:
-            return 'head'
         if self.regular:
             return 'regular'
         if self.trapezoid:
@@ -115,7 +115,27 @@ class RobotPosition:
 
     # ── 辅助方法 ────────────────────────────────────────────────
 
-    def _emit(self, area, num, num_F, dir_, pos, is_tail=False):
+    def _box_params(self, box_type):
+        """返回指定箱型的有效尺寸与抓取配置（已叠加 reserve）。"""
+        if box_type not in self.box_configs:
+            raise ValueError(f"未找到箱型 {box_type} 的尺寸配置")
+        cfg = self.box_configs[box_type]
+        rsv = cfg.get('reserve', {})
+        size = [
+            cfg['size']['L'] + rsv.get('L', 0),
+            cfg['size']['W'] + rsv.get('W', 0),
+            cfg['size']['H'] + rsv.get('H', 0),
+        ]
+        grip = cfg.get('grip', {})
+        return {
+            'size': size,
+            'grab_p1': grip['P1'][0] if grip.get('P1') else 4,
+            'grab_p2': grip['P2'][0] if grip.get('P2') else 2,
+            'grab_p3': grip['P3'][0] if grip.get('P3') else 2,
+        }
+
+    def _emit(self, area, num, num_F, dir_, pos, is_tail=False,
+              box_type=None, box_size=None):
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
         boxes 中 num 存整数，并附加箱型信号（+10）：
@@ -125,14 +145,22 @@ class RobotPosition:
         self._id += 1
         num_int = sum(num) if isinstance(num, list) else num
         num_list = num if isinstance(num, list) else [num]
-        box_first = str(self.box_type)[0]
+        action_box_type = self.box_type if box_type is None else box_type
+        params = self._box_params(action_box_type)
+        action_box_size = list(params['size'] if box_size is None else box_size)
+        box_first = str(action_box_type)[0]
         if box_first in ('2', '3') or (box_first == '1' and area == 'p3'):
             num_int += 10
         self.robot_offsets.append({
             'id': self._id, 'area': area, 'num': num_list, 'gaps': [], 'num_F': num_F,
-            'action': 0, 'dir': dir_, 'pos': pos, 'size': self.box_size
+            'action': 0, 'dir': dir_, 'pos': pos, 'size': action_box_size,
+            'box_type': action_box_type, 'grab_num_p1': params['grab_p1'],
         })
-        self.boxes.append({'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F, 'action': 0, 'area_cfg': 0, 'is_tail': is_tail})
+        self.boxes.append({
+            'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F,
+            'action': 0, 'area_cfg': 0, 'is_tail': is_tail,
+            'box_type': action_box_type,
+        })
 
     @staticmethod
     def _split_grabs(N, grab_num, min2=False):
@@ -185,7 +213,8 @@ class RobotPosition:
         idx = (f + t) % 2
         return copy.deepcopy(group_src[idx]), copy.deepcopy(stack_src[idx])
 
-    def _emit_p1_groups(self, g, s, gap_, height, num_F, n1):
+    def _emit_p1_groups(self, g, s, gap_, height, num_F, n1,
+                        box_type=None, box_size=None):
         """按 Stack/Group 分组方式发出一层 P1 的所有抓取动作。
         n1: 本条 regular/梯形的 N1（P1 每层箱数），用于算右边界（多条 regular 时各条不同）。
         放置顺序：左(0) → 右(last) → 中间(1..last-1)。
@@ -195,6 +224,8 @@ class RobotPosition:
         pos = gap * sum(s[:base+1]) * 0.01 + base * w
         若 Stack 在组内部有非零比例（缝隙落在一次抓取中间），num 按缝隙位置拆成子数组，
         gaps 存每段之间的缝隙 mm，机器人侧按 num/gaps 分段放置。"""
+        action_box_size = self.box_size if box_size is None else box_size
+        box_w = action_box_size[1]
         n_groups = len(g)
         if n_groups <= 2:
             visit_order = list(range(n_groups))
@@ -207,7 +238,7 @@ class RobotPosition:
         for step, n in enumerate(visit_order):
             base = sum(g[:n])
             num_boxes = g[n]
-            pos = gap_ * sum(s[:base + 1]) * 0.01 + base * self.w
+            pos = gap_ * sum(s[:base + 1]) * 0.01 + base * box_w
             # dir_：按放置步骤序号决定
             #   第1抓(step=0) → dir_=1（从右往左放）
             #   第2抓(step=1)且组数>2 → dir_=2（从左往右放）
@@ -220,36 +251,37 @@ class RobotPosition:
             else:
                 left_placed = (n - 1) in placed
                 right_placed = (n + 1) in placed
-                p1_right_wall = gap_ + n1 * self.w  # P1 区右边界（y=0 为左墙）
+                p1_right_wall = gap_ + n1 * box_w  # P1 区右边界（y=0 为左墙）
                 if left_placed and right_placed:
                     # 两侧均已放，计算物理间隙，向间隙小的一侧对齐；相等时取 dir_=1
                     base_left = sum(g[:n - 1])
-                    left_end = gap_ * sum(s[:base_left + 1]) * 0.01 + (base_left + g[n - 1]) * self.w
+                    left_end = gap_ * sum(s[:base_left + 1]) * 0.01 + (base_left + g[n - 1]) * box_w
                     left_gap = pos - left_end
 
                     base_right = sum(g[:n + 1])
-                    right_start = gap_ * sum(s[:base_right + 1]) * 0.01 + base_right * self.w
-                    right_gap = right_start - (pos + g[n] * self.w)
+                    right_start = gap_ * sum(s[:base_right + 1]) * 0.01 + base_right * box_w
+                    right_gap = right_start - (pos + g[n] * box_w)
 
                     dir_ = 1 if left_gap <= right_gap else 2
                 elif left_placed:
                     # 右侧无邻组，以车厢壁为右边界
                     base_left = sum(g[:n - 1])
-                    left_end = gap_ * sum(s[:base_left + 1]) * 0.01 + (base_left + g[n - 1]) * self.w
+                    left_end = gap_ * sum(s[:base_left + 1]) * 0.01 + (base_left + g[n - 1]) * box_w
                     left_gap = pos - left_end
-                    right_gap = p1_right_wall - (pos + g[n] * self.w)
+                    right_gap = p1_right_wall - (pos + g[n] * box_w)
                     dir_ = 1 if left_gap <= right_gap else 2
                 elif right_placed:
                     # 左侧无邻组，以 y=0 左墙为左边界
                     left_gap = pos
                     base_right = sum(g[:n + 1])
-                    right_start = gap_ * sum(s[:base_right + 1]) * 0.01 + base_right * self.w
-                    right_gap = right_start - (pos + g[n] * self.w)
+                    right_start = gap_ * sum(s[:base_right + 1]) * 0.01 + base_right * box_w
+                    right_gap = right_start - (pos + g[n] * box_w)
                     dir_ = 1 if left_gap <= right_gap else 2
                 else:
                     dir_ = 1
             placed.add(n)
-            self._emit('p1', g[n], num_F, dir_, [0, pos, height])
+            self._emit('p1', g[n], num_F, dir_, [0, pos, height],
+                       box_type=box_type, box_size=action_box_size)
             # 扫描组内每个箱位间隙，将 num 拆段、gaps 填入缝隙 mm
             seg_counts, seg_gaps = [], []
             seg_start = 0
@@ -274,10 +306,9 @@ class RobotPosition:
             cum += num
 
     def _emit_p3_row(self, N3, z, num_F):
-        """发出 P3 区一行的所有抓取动作，y 从左边距起按箱高累积。
-        左边距默认 50mm，当整行 N3*h 接近填满可用宽(W-RW)时收窄边距，
-        保证末箱不超出右墙（方案A：夹紧左边距 min(50, 可用余量)）。"""
-        y_start = min(50, (self.W - self.RW) - N3 * self.h)
+        """发出 P3 区一行的所有抓取动作，y 从 0 起按箱高累积。
+        P3 不扣 RW、不留左边距（直接贴左壁）。"""
+        y_start = 0
         cum = 0
         for num in self._split_grabs(N3, self.grab_num_p3):
             self._emit('p3', num, num_F, 1, [0, y_start + cum * self.h, z])
@@ -287,16 +318,14 @@ class RobotPosition:
 
     def read_robot_offset(self):
         """按 block 类型分派到对应解析器，生成 robot_offsets / ori_offsets / boxes。"""
-        if self.block_type == 'head':
-            self._parse_head()
-        elif self.block_type == 'regular':
+        if self.block_type == 'regular':
             self._parse_regular()
         elif self.block_type == 'trapezoid':
             self._parse_trapezoid()
         elif self.block_type == 'mixture':
             self._parse_mixture()
         else:
-            raise ValueError("未知 block 类型：regular/trapezoid/mixture/head 字段均为空")
+            raise ValueError("未知 block 类型：regular/trapezoid/mixture 字段均为空")
         self._finalize()
 
     def _parse_regular(self):
@@ -337,7 +366,7 @@ class RobotPosition:
                 _z_tail = T12 * self.h + (T3 if N3 != 0 else 0) * self.w
                 # E==2 顶置尾料（每面完成后追加到 P3 顶层，箱子侧立，仅1xx允许）
                 if E == 2 and E_ != 0:
-                    N3_ = int((self.W - self.RW) // self.h) if N3 == 0 else N3
+                    N3_ = int(self.W // self.h) if N3 == 0 else N3
                     Nx_ = min(N3_, E_)
                     self._emit_p3_row(Nx_, _z_tail, num_F_reg)
                     E_ -= Nx_
@@ -352,7 +381,7 @@ class RobotPosition:
                 self.boxes[-1]['action'] = 1
 
             if E == 2 and E_ != 0:
-                N3_cap = int((self.W - self.RW) // self.h) if N3 == 0 else N3
+                N3_cap = int(self.W // self.h) if N3 == 0 else N3
                 _logger.warning(
                     f"E==2 尾料未完全分配，剩余 {E_} 个（Nx={Nx}, F13={F13}, N3_={N3_cap}）")
             if E == 3 and E_ != 0:
@@ -402,7 +431,7 @@ class RobotPosition:
                 box_first = str(self.box_type)[0]
                 if box_first == '1':
                     # P3顶置：规则同 regular E==2
-                    N_cap = trap['N3'] if trap['N3'] != 0 else int((self.W - self.RW) // self.h)
+                    N_cap = trap['N3'] if trap['N3'] != 0 else int(self.W // self.h)
                     Nx_ = min(N_cap, trap['Nx'])
                     if trap['Nx'] > N_cap:
                         _logger.warning(
@@ -423,10 +452,63 @@ class RobotPosition:
             self.boxes[-1]['action'] = 1
 
     def _parse_mixture(self):
-        raise NotImplementedError("mixture block 解析暂未实现")
+        """混装面：一面内全部按 P1 放置，下方 A 箱型完成收尾，上方 B 箱型接续。"""
+        for face_idx, mix in enumerate(self.mixture):
+            num_F = face_idx + 1
+            z_base = 0
+            emitted_before = len(self.robot_offsets)
+            parts = (
+                ('A', mix.get('NA', mix.get('N1', 0)),
+                 mix.get('TA', mix.get('T1', 0)), mix.get('TypeA', ''),
+                 mix.get('StackA', mix.get('Stack', [])),
+                 mix.get('GroupA', mix.get('Group', []))),
+                ('B', mix.get('NB', mix.get('N3', 0)),
+                 mix.get('Tb', mix.get('T3', 0)), mix.get('TypeB', ''),
+                 mix.get('StackB', []), mix.get('GroupB', [])),
+            )
+            for label, n_row, n_layers, box_type, stacks, groups in parts:
+                if n_row == 0 and n_layers == 0:
+                    continue
+                if n_row <= 0 or n_layers <= 0:
+                    raise ValueError(
+                        f"Mixture {label} 区参数不完整：N={n_row}, T={n_layers}")
+                if not box_type:
+                    raise ValueError(f"Mixture {label} 区缺少箱型 Type{label}")
+                if not stacks or not groups:
+                    raise ValueError(f"Mixture {label} 区缺少 Stack{label}/Group{label}")
 
-    def _parse_head(self):
-        raise NotImplementedError("head block 解析暂未实现")
+                params = self._box_params(box_type)
+                box_size = params['size']
+                box_w, box_h = box_size[1], box_size[2]
+                gap = self.W - n_row * box_w
+                if gap < 0:
+                    raise ValueError(
+                        f"Mixture {label} 区单层超出车宽：{n_row}×{box_w} > {self.W}")
+
+                for layer in range(n_layers):
+                    pattern_idx = (face_idx + layer) % len(groups)
+                    g = copy.deepcopy(groups[pattern_idx])
+                    s = copy.deepcopy(stacks[(face_idx + layer) % len(stacks)])
+                    if sum(g) != n_row:
+                        raise ValueError(
+                            f"Mixture {label} 区 Group{label}[{pattern_idx}]箱数"
+                            f" {sum(g)} != N{label} {n_row}")
+                    if len(s) < n_row + 1:
+                        raise ValueError(
+                            f"Mixture {label} 区 Stack{label}长度 {len(s)}"
+                            f" 小于 N{label}+1={n_row + 1}")
+                    self._emit_p1_groups(
+                        g, s, gap, z_base + layer * box_h, num_F, n_row,
+                        box_type=box_type, box_size=box_size)
+                z_base += n_layers * box_h
+                if z_base > self.H:
+                    raise ValueError(
+                        f"Mixture 累计高度 {z_base} 超出车厢高度 {self.H}")
+
+            if len(self.robot_offsets) == emitted_before:
+                raise ValueError("Mixture 面没有可生成的箱子")
+            self.robot_offsets[-1]['action'] = 1
+            self.boxes[-1]['action'] = 1
 
     def _finalize(self):
         """末尾处理：标记 block 结束、填充 ori_offsets 快照、计算 area_cfg 位置编号。"""

@@ -50,7 +50,7 @@ cfg = {
         ],
     }],
     'trapezoid': [],
-    'head': [],
+    'mixture': [],
 }
 
 rp = RobotPosition(cfg)

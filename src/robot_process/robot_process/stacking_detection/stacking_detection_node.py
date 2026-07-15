@@ -28,26 +28,50 @@ LIDAR_TIMEOUT_SEC = 5.0          # 采集超时(秒)：topic 未发布/帧数不
 
 # ── 直通滤波范围(米)：从合并点云裁出一个 y 切片用于测宽 ──
 PASS_X = (-2.0, 2.0)             # 宽度方向(x)保留范围
-PASS_Y = (-2.0, -1.0)            # 深度方向(y)保留范围 = 测宽切片位置
+PASS_Y = (-2.5, -1.0)            # 深度方向(y)保留范围 = 测宽切片位置
 PASS_Z = (-1.5, 2.0)             # 高度方向(z)保留范围(宽松；顶部薄片噪声由 MIN_CLUSTER_ZSPAN_M 过滤)
 PASS_MIN_PTS = 10                # 直通后最少点数，不足则报错
 
 # ── 法向量滤波：保留法向接近 ±x 的侧面点 ──
-NORMAL_KNN = 30                  # 法向估计的近邻点数
+NORMAL_KNN = 20                  # 法向估计的近邻点数 (从30降到20以提高速度)
 NORMAL_ANGLE_DEG = 20            # 法向与 x 轴夹角阈值(度)：20° 能抓到第一层箱面残余侧面点(10°漏掉)
 
 # ── DBSCAN 聚类 ──
-DBSCAN_EPS = 0.2                 # 邻域半径(米)：0.2 能合并车厢壁的 z 方向缝隙，又不混入箱面
-DBSCAN_MIN_POINTS = 10           # 成簇最少点数：10 能抓住极稀疏的第一层箱面(20-80点级别)
+DBSCAN_EPS = 0.15                # 邻域半径(米)：从0.2降到0.15，提高聚类精度同时保持速度
+DBSCAN_MIN_POINTS = 8            # 成簇最少点数：从10降到8，保持敏感度
 
 # ── 簇筛选与左右配对 ──
-MIN_CLUSTER_PTS = 20             # 簇最小点数：20 能保住稀疏箱面，又能过滤孤立噪点
-MIN_CLUSTER_ZSPAN_M = 0.10       # 簇最小 z 跨度(米)：0.10 过滤顶部薄片(<0.08)，保住稀疏第一层(0.1-0.4)
+MIN_CLUSTER_PTS = 15             # 簇最小点数：15 能保住更稀疏的第一层箱面，又能过滤孤立噪点
+MIN_CLUSTER_ZSPAN_M = 0.02       # 簇最小 z 跨度(米)：0.10 过滤顶部薄片(<0.08)，保住稀疏第一层(0.1-0.4)
 MAX_CLUSTER_CZ_M = 1.0           # 簇 z 重心上限(米)：> 此值视为车厢顶部凸起结构(管线/灯)，丢弃
+
+# ── 当前面 Y 锁定（深度方向，只保留最靠雷达的当前面箱，滤掉后排箱）──
+FRONT_Y_BIN = 0.05               # Y 直方图 bin 宽(米)
+FRONT_Y_MIN_PTS = 100            # Y bin 视为"有箱"的最小点数
+FRONT_Y_DEPTH = 0.45             # 当前面保留深度(米)：从前沿往后取此窗口=最小箱长，
+                                 #   保证落在前排箱内、不碰后排箱（箱长 450~530mm）
+
+# ── 当前行 Z 自适应锁定（避免相邻层干扰）──
+LAYER_SEARCH_TOL_RATIO = 0.4     # 搜箱顶容差 = box_h × 此比例(±)：理论与实际的最大偏差(40%箱高)
+LAYER_TOP_NORMAL_DEG = 15        # 水平面识别角度阈值(度)：|nz| > cos(此值) 视为箱顶水平面
+LAYER_TOP_MIN_PTS = 10           # 当前层箱顶水平面最少点数（高层点云较稀疏）
+LAYER_Z_HIST_BIN = 0.01          # z 直方图 bin 宽(米)：1cm，对应实际放置精度量级
+LAYER_PEAK_MIN_PTS = 3           # 箱顶候选高度 bin 的最少水平面点数
+LAYER_PEAK_MIN_RATIO = 0.10      # 候选 bin 点数至少达到当前最强峰的此比例
+LAYER_Z_MARGIN_TOP = 0.03        # 锁定 z 范围上沿留余量(米)：略高于本层顶面，防漏点
+LAYER_Z_MARGIN_BOTTOM = 0.03     # 锁定 z 范围下沿留余量(米)：略高于本层底面，避下层顶面
+FLOOR_MIN_PTS = 50              # 地板检测取最低点数：取 z 最小的此数个点的中位数作地板，
+                                #   地板被货物遮挡仅剩零星点时仍稳定，又抗个别雷达噪点
+FLOOR_Z_DEFAULT = -1.13         # 首层地板不可见时的标定回退值（雷达坐标系，米）
+FLOOR_Z_MAX_DEVIATION = 0.15    # 自动标定相对回退值的最大允许偏差，超出视为噪点/遮挡
 MIN_VALID_WIDTH_MM = 500         # 测宽下限(mm)，小于此判为货物窄缝 → 向外重选
 MAX_Z_DIFF_M = 0.15              # 两箱面 z 重心最大高度差(米)，超出判为跨层(仅两侧都是箱面时校验)
 WALL_PTS = 1000                  # 簇点数 ≥ 此判为墙，跳过 z 重心校验(单侧壁合并后约 1200 点)
 FACE_PCT = 10                    # 取簇内侧面 FACE_PCT% 的点求面位置(抗噪)
+
+# 地板在同一码垛过程中不变。第一层还能看到地板时标定，高层遮挡后复用，
+# 避免把货物或车体上的低点误当地板。
+_floor_z_cached = None
 
 # ── 偏航补偿（雷达绕机器人 J1 轴摆动）──
 # 拍照位 J1 与正对 J1 不同 → 点云绕 J1 轴偏航，需转回正对系再测量。
@@ -56,7 +80,7 @@ J1_AXIS_XY = (0.269, 0.506)      # J1 轴水平位置 (ax, ay) 米；由车厢�
 J1_DEROTATE_SIGN = 1             # 补偿旋转方向：雷达系绕 J1 轴的旋转角 = θ_photo - θ_face = +yaw_offset_deg
 
 # ── 可视化 ──
-VIEW = True                     # 可视化总开关：True 才弹出各阶段点云窗口(原始/法向/聚类/拟合)
+VIEW = False                     # 可视化总开关：True 才弹出各阶段点云窗口(原始/法向/聚类/拟合)
 VIEW_FRONT_Y = 4.0               # 原始点云仅显示雷达前方此距离(米)内的点
 
 
@@ -471,15 +495,125 @@ def _derotate_about_j1(pts, angle_deg, axis_xy):
     return out
 
 
-def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
+def _detect_floor_z(pts):
+    """从点云自标定地板 z（雷达坐标系，米）：取车厢内(PASS_XY)最低 FLOOR_MIN_PTS 个点的中位数。
+    地板是最低的物理面，但常被货物大面积遮挡导致其点极稀疏（低分位数都抓不到）——
+    直接取 z 最小的若干点取中位数，既贴近真地板又抗个别雷达噪点。
+    找不到时退回 PASS_Z 下沿。"""
+    xy = pts[(pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
+             (pts[:, 1] >= PASS_Y[0]) & (pts[:, 1] <= PASS_Y[1]) &
+             (pts[:, 2] >= PASS_Z[0]) & (pts[:, 2] <= PASS_Z[1])]
+    if len(xy) < FLOOR_MIN_PTS:
+        return PASS_Z[0]
+    lowest = np.partition(xy[:, 2], FLOOR_MIN_PTS - 1)[:FLOOR_MIN_PTS]
+    return float(np.median(lowest))
+
+
+def _resolve_floor_z(pts, rel_top_h, box_h):
+    """首层自动标定地板并缓存，后续层复用。
+
+    只在 rel_top_h 接近一个箱高时重新标定，因为第二层开始地板通常已被遮挡。
+    标定值距离现场回退值过大时拒绝，防止极低噪点或车体结构污染缓存。
+    """
+    global _floor_z_cached
+    is_first_layer = rel_top_h <= box_h * 1.5
+    if is_first_layer:
+        detected = _detect_floor_z(pts)
+        if np.isfinite(detected) and abs(detected - FLOOR_Z_DEFAULT) <= FLOOR_Z_MAX_DEVIATION:
+            _floor_z_cached = detected
+            _dbg(f"地板Z首层自动标定：{detected:.3f}m")
+        else:
+            _dbg(f"地板Z自动标定值 {detected:.3f}m 不可信，使用回退值 {FLOOR_Z_DEFAULT:.3f}m")
+    return _floor_z_cached if _floor_z_cached is not None else FLOOR_Z_DEFAULT
+
+
+def _lock_layer_z_range(pts, rel_top_h, box_h, y_range=None):
+    """根据当前抓"距地板的理论顶面高度"把 Z 范围锁定到当前行，隔离上下相邻层干扰。
+    内部自标定地板 z，再用实测箱顶精修，理论值仅作粗定位（容差 box_h×比例）。
+
+    pts: Nx3 ndarray（已偏航补偿）；rel_top_h: 当前层顶面距地板高度(米，相对值)；
+    box_h: 当前抓箱子竖向高度(米)。
+    返回 (z_min, z_max, actual_top_z)。
+    """
+    floor_z = _resolve_floor_z(pts, rel_top_h, box_h)
+    theo_top_z = floor_z + rel_top_h        # 理论顶面在雷达系的 z
+    tol = box_h * LAYER_SEARCH_TOL_RATIO
+    y_min, y_max = y_range if y_range is not None else PASS_Y
+    # 理论顶面附近搜水平面点（箱顶），用实测精修。
+    # 先限制在车厢 XY 测量区内：原来只裁 Z，会把整个场景中的同高度点
+    # 都送入 KNN 法向估计，百万点点云下既慢，又容易被车厢外的水平结构干扰。
+    band_mask = (
+        (pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
+        (pts[:, 1] >= y_min) & (pts[:, 1] <= y_max) &
+        (pts[:, 2] >= theo_top_z - tol) & (pts[:, 2] <= theo_top_z + tol)
+    )
+    band = pts[band_mask]
+    actual_top_z = theo_top_z
+    if len(band) >= 30:
+        _bp = o3d.geometry.PointCloud()
+        _bp.points = o3d.utility.Vector3dVector(band)
+        _bp.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=NORMAL_KNN))
+        nz = np.abs(np.asarray(_bp.normals)[:, 2])
+        top_pts = band[nz > np.cos(np.radians(LAYER_TOP_NORMAL_DEG))]
+        if len(top_pts) >= LAYER_TOP_MIN_PTS:
+            z_lo, z_hi = top_pts[:, 2].min(), top_pts[:, 2].max()
+            nbin = max(1, int((z_hi - z_lo) / LAYER_Z_HIST_BIN))
+            hist, edges = np.histogram(top_pts[:, 2], bins=nbin)
+            centers = (edges[:-1] + edges[1:]) * 0.5
+            # 窗口内可能同时存在车体横梁、下层箱顶等水平面。不取全局最强峰，
+            # 而是先过滤掉稀疏噪点，再选最接近理论顶面的高度峰。
+            min_support = max(LAYER_PEAK_MIN_PTS,
+                              int(np.ceil(hist.max() * LAYER_PEAK_MIN_RATIO)))
+            candidates = np.flatnonzero(hist >= min_support)
+            if len(candidates):
+                best = candidates[np.argmin(np.abs(centers[candidates] - theo_top_z))]
+                actual_top_z = float(centers[best])
+            _dbg(f"当前行Z锁定：地板={floor_z:.3f}m 理论顶={theo_top_z:.3f}m 实测顶={actual_top_z:.3f}m "
+                 f"(偏差 {(actual_top_z - theo_top_z) * 1000:+.0f}mm, 箱顶点={len(top_pts)})")
+        else:
+            _dbg(f"当前行Z锁定：理论顶附近无足够箱顶水平面，退回理论值 {theo_top_z:.3f}m（地板={floor_z:.3f}m）")
+    else:
+        _dbg(f"当前行Z锁定：理论顶附近点数不足({len(band)})，退回理论值 {theo_top_z:.3f}m（地板={floor_z:.3f}m）")
+
+    z_min = actual_top_z - box_h + LAYER_Z_MARGIN_BOTTOM
+    z_max = actual_top_z + LAYER_Z_MARGIN_TOP
+    return z_min, z_max, actual_top_z
+
+
+def _lock_front_face_y(pts):
+    """深度(y)方向只保留最靠雷达的"当前面"箱，滤掉后排箱。
+    已知箱长 450~530mm：定位最靠雷达(y 最大)的第一个密集 bin = 当前面前沿，
+    从前沿往后取 FRONT_Y_DEPTH（最小箱长）窗口即可，保证落在前排箱内、不碰后排。
+    返回 (y_min, y_max)；点数不足时退回 PASS_Y。"""
+    if len(pts) < FRONT_Y_MIN_PTS:
+        return PASS_Y
+    nbin = max(1, int((pts[:, 1].max() - pts[:, 1].min()) / FRONT_Y_BIN))
+    hist, edges = np.histogram(pts[:, 1], bins=nbin)
+    # 定位最靠雷达的第一个密集 bin = 当前面前沿
+    i = len(hist) - 1
+    while i >= 0 and hist[i] < FRONT_Y_MIN_PTS:
+        i -= 1
+    if i < 0:
+        return PASS_Y
+    y_front = float(edges[i + 1])
+    y_back = max(y_front - FRONT_Y_DEPTH, PASS_Y[0])
+    return (y_back, y_front)
+
+
+def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
+                   rel_top_h=None, box_h=None):
     """
     合并双雷达点云，测量左右侧面总宽度（mm）。
 
     view=None 时在调用时读取顶部 VIEW 开关（避免默认参数在定义时被绑死）。
     yaw_offset_deg: 拍照位相对正对的偏航角(度)。雷达绕机器人 J1 轴摆动导致点云偏航，
                     需将点云转回正对系再测量。
+    rel_top_h / box_h: 当前抓"顶面距地板的高度"和箱子竖向高度(米)。两者都给定时，
+                    内部自标定地板 + 实测箱顶，把直通滤波 Z 锁定到"当前行"隔离相邻层；
+                    否则用全局 PASS_Z。
 
     策略：
+      0. 偏航补偿 + （可选）当前行 Z 锁定
       1. 直通滤波
       2. 法向量滤波保留 ±x 侧面点
       3. DBSCAN 聚类，取最大两簇按 x 重心区分左右
@@ -488,8 +622,13 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
     """
     if view is None:
         view = VIEW
-    pcd = valid_pcd(pc1) + valid_pcd(pc2)
-    pts = np.asarray(pcd.points)
+    
+    # 记录开始时间
+    total_start_time = time.time()
+    
+    # 一次性合并点云并转换为numpy数组，避免后续重复转换
+    pcd_combined = valid_pcd(pc1) + valid_pcd(pc2)
+    pts = np.asarray(pcd_combined.points)
 
     # ── 0. 偏航补偿：绕 J1 轴把点云转回正对系 ────────────────────────────────
     # 雷达绕 J1 轴摆 yaw_offset_deg → 点云在水平面内偏航。标定出 J1_AXIS_XY 后启用。
@@ -502,25 +641,68 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
 
     start_time = time.time()
 
-    # ── 1. 直通滤波 ──────────────────────────────────────────────────────────
-    mask = (
+    # ── 0b. 先用全高点云锁定当前面 Y，避免箱顶搜索被后排/车体干扰 ──
+    pass_y = PASS_Y
+    _global_roi = (
         (pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
         (pts[:, 1] >= PASS_Y[0]) & (pts[:, 1] <= PASS_Y[1]) &
         (pts[:, 2] >= PASS_Z[0]) & (pts[:, 2] <= PASS_Z[1])
     )
+    _ymin, _ymax = _lock_front_face_y(pts[_global_roi])
+    if (_ymin, _ymax) != PASS_Y:
+        pass_y = (_ymin, _ymax)
+
+    # ── 0c. 当前行 Z 锁定（可选）：自标定地板 + 实测箱顶，把 Z 收窄到当前行 ──────
+    pass_z = PASS_Z
+    _z_locked = False
+    if rel_top_h is not None and box_h is not None:
+        _zmin, _zmax, _ = _lock_layer_z_range(
+            pts, rel_top_h, box_h, y_range=pass_y)
+        # 与全局 PASS_Z 取交集，防止锁定范围越出有效区
+        pass_z = (max(PASS_Z[0], _zmin), min(PASS_Z[1], _zmax))
+        _z_locked = True
+        _dbg(f"当前行Z范围：[{pass_z[0]:.3f}, {pass_z[1]:.3f}] m")
+
+    # Z 锁定后再用当前层点云精修 Y；全高锁定失败时这一步仍可恢复。
+    _xz = ((pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
+           (pts[:, 1] >= PASS_Y[0]) & (pts[:, 1] <= PASS_Y[1]) &
+           (pts[:, 2] >= pass_z[0]) & (pts[:, 2] <= pass_z[1]))
+    _ymin, _ymax = _lock_front_face_y(pts[_xz])
+    if (_ymin, _ymax) != PASS_Y:
+        pass_y = (_ymin, _ymax)
+        _dbg(f"当前面Y范围：[{pass_y[0]:.3f}, {pass_y[1]:.3f}] m（已滤掉后排箱）")
+
+    # 记录预处理阶段耗时
+    preprocessing_time = time.time() - start_time
+    start_time = time.time()
+
+    # ── 1. 直通滤波 ──────────────────────────────────────────────────────────
+    mask = (
+        (pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
+        (pts[:, 1] >= pass_y[0]) & (pts[:, 1] <= pass_y[1]) &
+        (pts[:, 2] >= pass_z[0]) & (pts[:, 2] <= pass_z[1])
+    )
+    
+    # 添加早期退出检查，如果直通滤波后点数太少直接返回
+    filtered_pts = pts[mask]
+    if len(filtered_pts) < PASS_MIN_PTS:
+        _dbg("计算失败：直通滤波后点数不足，请检查坐标范围参数")
+        return None
+
     if view:
         # 原始点云(灰) + 直通框选中部分(绿)，直观看裁剪框相对整体的位置
         # 仅显示用裁剪：车厢长轴(y)太长，只显示雷达前方 VIEW_FRONT_Y 米内的点
-        # 在 PASS 范围外留 1m 余量，再裁掉车厢外明显远点的反射噪声（不影响计算，只清理可视化）
+        # 灰色背景 z 不跟随当前行锁定，显示完整车厢高度，便于看绿色切片落在哪一层
+        # x 留 1m 余量裁掉车外远点；y 限前方窗口（不影响计算，只清理可视化）
         view_margin = 1.0
         front = pts[(pts[:, 1] >= -VIEW_FRONT_Y) & (pts[:, 1] <= 0.5) &
-                    (pts[:, 0] >= PASS_X[0] - view_margin) & (pts[:, 0] <= PASS_X[1] + view_margin) &
-                    (pts[:, 2] >= PASS_Z[0] - view_margin) & (pts[:, 2] <= PASS_Z[1] + view_margin)]
+                    (pts[:, 0] >= PASS_X[0] - view_margin) & (pts[:, 0] <= PASS_X[1] + view_margin)
+                    & (pts[:, 2] >= PASS_Z[0]) & (pts[:, 2] <= PASS_Z[1])]
         raw = o3d.geometry.PointCloud()
         raw.points = o3d.utility.Vector3dVector(front)
         raw.paint_uniform_color([0.6, 0.6, 0.6])
         sel = o3d.geometry.PointCloud()
-        sel.points = o3d.utility.Vector3dVector(pts[mask])
+        sel.points = o3d.utility.Vector3dVector(filtered_pts)
         sel.paint_uniform_color([0.1, 0.9, 0.1])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name=f"雷达前方{VIEW_FRONT_Y}m原始点云(灰) + 直通框选(绿)", width=1000, height=700)
@@ -528,17 +710,23 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         vis.add_geometry(sel)
         vis.run()
         vis.destroy_window()
-    pts = pts[mask]
-    if len(pts) < PASS_MIN_PTS:
-        _dbg("计算失败：直通滤波后点数不足，请检查坐标范围参数")
-        return None
+    
+    pts = filtered_pts  # 使用已经过滤的数据
+
+    # 记录直通滤波耗时
+    passthrough_time = time.time() - start_time
+    start_time = time.time()
 
     # ── 2. 法向量滤波 ────────────────────────────────────────────────────────
+    # 优化：仅在必要时进行法向量估计
     _pcd = o3d.geometry.PointCloud()
     _pcd.points = o3d.utility.Vector3dVector(pts)
     _pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=NORMAL_KNN))
     nx = np.abs(np.asarray(_pcd.normals)[:, 0])
     side_pts = pts[nx > np.cos(np.radians(NORMAL_ANGLE_DEG))]
+    if len(side_pts) < DBSCAN_MIN_POINTS:
+        _dbg(f"计算失败：法向滤波后侧面点不足({len(side_pts)})，无法聚类")
+        return None
 
     if view:
         bg0 = o3d.geometry.PointCloud()
@@ -554,12 +742,22 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         vis.run()
         vis.destroy_window()
 
+    # 记录法向量滤波耗时
+    normal_filter_time = time.time() - start_time
+    start_time = time.time()
+
     # ── 3. DBSCAN 聚类 ───────────────────────────────────────────────────────
     sp_pcd = o3d.geometry.PointCloud()
     sp_pcd.points = o3d.utility.Vector3dVector(side_pts)
+    
+    # 使用更高效的DBSCAN参数
     labels = np.array(sp_pcd.cluster_dbscan(eps=DBSCAN_EPS, min_points=DBSCAN_MIN_POINTS))
     n_clusters = labels.max() + 1
 
+    # 添加早期退出：如果聚类数量过多，可能是参数不合适
+    if n_clusters > 50:  # 设置合理的聚类上限
+        _dbg(f"警告：聚类数量过多({n_clusters})，可能需要调整参数")
+    
     if view:
         rng = np.random.default_rng(0)
         cluster_colors = rng.random((max(n_clusters, 1), 3))
@@ -586,11 +784,16 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
         vis.run()
         vis.destroy_window()
 
+    # 记录聚类耗时
+    clustering_time = time.time() - start_time
+    start_time = time.time()
+
     # ── 4. 按 x 重心选左右两簇（各侧取最靠近原点的簇）──────────────────────
     # 过滤规则：
     #   - 点数不足 MIN_CLUSTER_PTS → 噪点
     #   - z 跨度不足 MIN_CLUSTER_ZSPAN_M → 顶部薄片(灯/横梁/手柄)，过滤
     #   - z 重心 > MAX_CLUSTER_CZ_M → 车厢顶部凸起结构(管线/灯具)，过滤
+    #     （Z 锁定模式下范围已收窄到当前行，关闭此绝对上限避免误删高处当前行）
     left_candidates, right_candidates = [], []
     for k in range(n_clusters):
         kpts = side_pts[labels == k]
@@ -601,7 +804,7 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
             _dbg(f"簇 k={k} 被过滤（zspan={zspan*100:.1f}cm < {MIN_CLUSTER_ZSPAN_M*100:.0f}cm，疑似顶部薄片）")
             continue
         cz = float(kpts[:, 2].mean())
-        if cz > MAX_CLUSTER_CZ_M:
+        if not _z_locked and cz > MAX_CLUSTER_CZ_M:
             _dbg(f"簇 k={k} 被过滤（cz={cz:.2f}m > {MAX_CLUSTER_CZ_M:.1f}m，疑似车厢顶部凸起）")
             continue
         cx = float(kpts[:, 0].mean())
@@ -615,46 +818,57 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
     left_sorted  = [k for _, k in sorted(left_candidates,  key=lambda t: -t[0])]
     right_sorted = [k for _, k in sorted(right_candidates, key=lambda t:  t[0])]
 
-    # 首选最内侧簇（原规则）。接受条件：宽度 ≥ _MIN_VALID_WIDTH_MM 且通过 z 重心校验。
-    #   - 宽度过窄 → 选到货物窄缝/下层缝
-    #   - z 重心校验：仅当"两侧都是箱子侧面"时要求 z 重心相近（挡掉跨层凑出的错误宽度）；
-    #     若任一侧是墙（点数远大于箱面 ≥ _WALL_PTS）则跳过 z 校验——箱↔墙本就高度不同。
-    # 不满足则向外侧推进重选重算，直到合格或候选耗尽。
-    li = ri = 0
-    while True:
-        left_k, right_k = left_sorted[li], right_sorted[ri]
-        lc = side_pts[labels == left_k]
-        rc = side_pts[labels == right_k]
-        lx, rx = lc[:, 0], rc[:, 0]
-        # 固定法向 [1,0,0]，取各簇内侧面 FACE_PCT% 点的均值作为面位置
-        x_left_face  = float(lx[lx >= np.percentile(lx, 100 - FACE_PCT)].mean())
-        x_right_face = float(rx[rx <= np.percentile(rx, FACE_PCT)].mean())
-        gap_mm = int((x_right_face - x_left_face) * 1000)
-        z_diff = abs(float(lc[:, 2].mean()) - float(rc[:, 2].mean()))
-        has_wall = (len(lx) >= WALL_PTS) or (len(rx) >= WALL_PTS)
-        width_ok = gap_mm >= MIN_VALID_WIDTH_MM
-        # 有墙则跳过 z 校验；两侧都是箱面才要求 z 重心相近
-        z_ok = has_wall or (z_diff <= MAX_Z_DIFF_M)
-        _dbg(f"选中左簇 k={left_k}({len(lx)}点) 右簇 k={right_k}({len(rx)}点)  "
-             f"宽度={gap_mm}mm  z重心差={z_diff*1000:.0f}mm  含墙={has_wall}")
-        if width_ok and z_ok:
+    # 业务约束：前一抓永远位于左侧，所以左侧始终取最内侧簇，
+    # 只允许右侧按“内→外”重选：左内-右内，或左内-右外。
+    left_k = left_sorted[0]
+    lc = side_pts[labels == left_k]
+    lx = lc[:, 0]
+    x_left_face = float(np.median(lx))
+    selected = None
+    for ri, right_k_ in enumerate(right_sorted):
+        rc_ = side_pts[labels == right_k_]
+        rx_ = rc_[:, 0]
+        x_right_ = float(np.median(rx_))
+        gap_ = int((x_right_ - x_left_face) * 1000)
+        z_diff_ = abs(float(lc[:, 2].mean()) - float(rc_[:, 2].mean()))
+        has_wall_ = (len(lx) >= WALL_PTS) or (len(rx_) >= WALL_PTS)
+        width_ok_ = gap_ >= MIN_VALID_WIDTH_MM
+        z_ok_ = _z_locked or has_wall_ or (z_diff_ <= MAX_Z_DIFF_M)
+        _dbg(f"候选左内 k={left_k}({len(lx)}点) 右#{ri} k={right_k_}({len(rx_)}点)  "
+             f"宽度={gap_}mm z重心差={z_diff_*1000:.0f}mm 含墙={has_wall_}")
+        if width_ok_ and z_ok_:
+            selected = (right_k_, rc_, x_right_, gap_, z_diff_)
             break
-        if li + 1 < len(left_sorted) or ri + 1 < len(right_sorted):
-            li = min(li + 1, len(left_sorted) - 1)
-            ri = min(ri + 1, len(right_sorted) - 1)
-            reason = "宽度过窄" if not width_ok else f"两侧均箱面但z重心差{z_diff*1000:.0f}mm过大"
-            _dbg(f"{reason}，向外重选 → 左#{li} 右#{ri}")
-        else:
-            _dbg(f"已无更外侧候选，保留当前结果 宽度{gap_mm}mm z差{z_diff*1000:.0f}mm")
-            break
+
+    if selected is None:
+        _dbg("计算失败：左内侧簇与所有右侧候选均不满足宽度/高度条件")
+        return None
+
+    right_k, rc, x_right_face, gap_mm, z_diff = selected
+    _dbg(f"最终选中左内簇 k={left_k}({len(lc)}点) 右簇 k={right_k}({len(rc)}点)  "
+         f"宽度={gap_mm}mm z重心差={z_diff*1000:.0f}mm")
 
     clusters = {
         'left':  side_pts[labels == left_k],
         'right': side_pts[labels == right_k],
     }
 
+    # 记录簇选择耗时
+    selection_time = time.time() - start_time
+
     # ── 4. 宽度 ──────────────────────────────────────────────────────────────
-    _dbg(f"最终测量宽度：{gap_mm} mm  耗时：{time.time() - start_time:.2f}s")
+    total_calc_time = time.time() - total_start_time
+    
+    # 只有在调试模式下才输出时间统计
+    if DEBUG:
+        _dbg(f"最终测量宽度：{gap_mm} mm")
+        _dbg(f"总耗时：{total_calc_time:.3f}s")
+        _dbg(f"  - 预处理：{preprocessing_time:.3f}s")
+        _dbg(f"  - 直通滤波：{passthrough_time:.3f}s") 
+        _dbg(f"  - 法向量滤波：{normal_filter_time:.3f}s")
+        _dbg(f"  - DBSCAN聚类：{clustering_time:.3f}s")
+        _dbg(f"  - 簇选择：{selection_time:.3f}s")
+        _dbg(f"  - 其他处理：{total_calc_time - (preprocessing_time + passthrough_time + normal_filter_time + clustering_time + selection_time):.3f}s")
 
     if view:
         bg = o3d.geometry.PointCloud()
@@ -694,13 +908,16 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0):
     return gap_mm
 
 
-def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0):
+def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0,
+                   rel_top_h=None, box_h=None):
     """测量堆叠宽度，返回 measured_mm（计算成功）或 None（计算失败/报错）。
     length、tolerance 参数保留以兼容旧调用，现已不参与判定——
     对外状态只表示是否顺利算出宽度，不再判定通过/不通过。
     yaw_offset_deg: 拍照位相对正对的偏航角(度)，用于点云偏航补偿。
+    rel_top_h / box_h: 当前抓顶面距地板高度和箱子竖向高度(米)，用于把测宽锁定到当前行。
     """
-    return _compute_width(pc1, pc2, yaw_offset_deg=yaw_offset_deg)
+    return _compute_width(pc1, pc2, yaw_offset_deg=yaw_offset_deg,
+                          rel_top_h=rel_top_h, box_h=box_h)
 
 
 def _default_save_dir():
@@ -743,7 +960,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260618_141830.pcd'
+    _FILENAME = '0626/merged_20260626_134759.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -767,7 +984,10 @@ if __name__ == '__main__':
     print(f'加载点云：{pcd_path}  点数={len(pcd.points)}')
 
     empty = o3d.geometry.PointCloud()
-    measured = _compute_width(pcd, empty,yaw_offset_deg=4)   # view 跟随顶部 VIEW 开关
+    # 当前行 Z 锁定调试：rel_top_h=当前行顶面距地板高度(米)，box_h=箱竖向高度(米)
+    # 不需要锁定时把这两个参数删掉即可
+    measured = _compute_width(pcd, empty, yaw_offset_deg=4,
+                              rel_top_h=0.285*8, box_h=0.285)   # view 跟随顶部 VIEW 开关
     print(f'\n测量宽度: {measured} mm')
 
     if len(args) >= 2:

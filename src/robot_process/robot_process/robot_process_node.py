@@ -120,18 +120,19 @@ def _parse_trapezoid(src_list):
 
 
 def _parse_mixture(src_list):
-    """解析 Mixture 列表（新增，替代原 Head），映射为 RobotPosition 兼容的 head 格式
-    NA/TA → N1/T1（下方部分），NB/Tb → N3/T3（上方部分）"""
+    """解析 Mixture 列表，保留上下两种箱型各自的层型与抓取分组。"""
     result = []
     for item in src_list:
-        if item.NA == 0:
+        if item.NA == 0 and item.NB == 0:
             continue
         result.append({
-            'N1': item.NA, 'T1': item.TA,
-            'N3': item.NB, 'T3': item.Tb,
-            'Nx': 0,
+            'NA': item.NA, 'TA': item.TA,
+            'StackA': [list(x.Width) for x in item.StackA],
+            'GroupA': [list(x.Unit) for x in item.GroupA],
             'TypeA': item.TypeA, 'TypeB': item.TypeB,
-            **_parse_stack_group(item, stack_attr='StackA', group_attr='GroupA'),
+            'NB': item.NB, 'Tb': item.Tb,
+            'StackB': [list(x.Width) for x in item.StackB],
+            'GroupB': [list(x.Unit) for x in item.GroupB],
         })
     return result
 
@@ -216,18 +217,19 @@ def parse_planner_json(data: dict):
                     'Group': [list(x['Unit'])  for x in item.get('Group', [])],
                 })
 
-            # mixture → head（NA/TA → N1/T1，NB/Tb → N3/T3）
-            head = []
+            # mixture：保留 A/B 两种箱型各自的层型与抓取分组
+            mixture = []
             for item in blk.get('mixture', []):
-                if item.get('NA', 0) == 0:
+                if item.get('NA', 0) == 0 and item.get('NB', 0) == 0:
                     continue
-                head.append({
-                    'N1': item['NA'], 'T1': item['TA'],
-                    'N3': item['NB'], 'T3': item['Tb'],
-                    'Nx': 0,
+                mixture.append({
+                    'NA': item.get('NA', 0), 'TA': item.get('TA', 0),
+                    'StackA': [list(x['Width']) for x in item.get('StackA', [])],
+                    'GroupA': [list(x['Unit']) for x in item.get('GroupA', [])],
                     'TypeA': item.get('TypeA', ''), 'TypeB': item.get('TypeB', ''),
-                    'Stack': [list(x['Width']) for x in item.get('StackA', [])],
-                    'Group': [list(x['Unit'])  for x in item.get('GroupA', [])],
+                    'NB': item.get('NB', 0), 'Tb': item.get('Tb', 0),
+                    'StackB': [list(x['Width']) for x in item.get('StackB', [])],
+                    'GroupB': [list(x['Unit']) for x in item.get('GroupB', [])],
                 })
 
             glob_data.append({
@@ -236,7 +238,7 @@ def parse_planner_json(data: dict):
                 'car':       car_info,
                 'regular':   regular,
                 'trapezoid': trapezoid,
-                'head':      head,
+                'mixture':   mixture,
                 'index':     index_info,
             })
     except Exception as e:
@@ -291,7 +293,7 @@ def callback(data):
                 'car':       car_info,
                 'regular':   _parse_regular(blk.regular),
                 'trapezoid': _parse_trapezoid(blk.trapezoid),
-                'head':      _parse_mixture(blk.mixture),
+                'mixture':   _parse_mixture(blk.mixture),
                 'index':     index_info,
             })
     except Exception as e:
@@ -447,7 +449,7 @@ def main():
         chk_value = 0
         # last_grab_action: get_path 刚下发的那一抓，供 cmd_stacking 计算"当前抓"宽度
         # （cmd_stacking 在 get_path 之后触发，robot_offsets[0] 已是下一抓，不能用）
-        # last_grab_box_type: 那一抓所属 block 的箱型（多 block 边界后 rp 已切换，rp.box_type 会错）
+        # last_grab_box_type: 那一抓的实际箱型（Mixture 内可在 TypeA/TypeB 间切换）
         last_grab_action = None
         last_grab_box_type = None
         # cur_box_id/cur_path_id: 当前已下发的 box/path 抓号，每次"先存后发"写入游标
@@ -457,7 +459,7 @@ def main():
         if resume_cursor is not None:
             rp_idx, rp, last_grab_action, cur_box_id, cur_path_id = _fast_forward(rp_list, be, resume_cursor)
             if last_grab_action is not None:
-                last_grab_box_type = rp.box_type
+                last_grab_box_type = last_grab_action.get('box_type', rp.box_type)
             logs.warning("===== 断点续传待确认 =====")
             logs.warning(f"将从 block {rp_idx + 1}/{len(rp_list)} 继续，"
                          f"已完成至 box_id≤{cur_box_id}, path_id≤{cur_path_id}")
@@ -496,7 +498,7 @@ def main():
                     + b'\x00\x00'
                 )
                 server.send_message(_build_msg(2, payload))
-                floor_n = rp.F13 + len(rp.trapezoid) + (1 if rp.Nx != 0 and rp.E == 1 else 0)
+                floor_n = rp.ori_offsets[-2]['num_F']
                 logs.debug(f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, 车厢宽度：{round(rp.W, 2)}, 箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}')
             elif mes_hex == cmd_get_per_count:
                 # 发送单面信息
@@ -512,8 +514,10 @@ def main():
                 except Exception as _e:
                     logs.error(f'每行抓数解析异常：{type(_e).__name__}: {_e}，已发 0 兜底')
                     _n_per_row = 0
+                _face_box_type = (rp.boxes[0].get('box_type', rp.box_type)
+                                  if rp.boxes else rp.box_type)
                 server.send_message(_build_msg(1, _data_block(
-                    float(pallet_cnt), float(rp.box_type), float(_n_per_row)
+                    float(pallet_cnt), float(_face_box_type), float(_n_per_row)
                 ) + b'\x00\x00'))
                 logs.debug(f'单面码垛放置次数：{pallet_cnt}，每行抓数={_n_per_row}')
             elif mes_hex == cmd_get_box:
@@ -529,11 +533,14 @@ def main():
                 box = rp.boxes.pop(0)
                 box_cfg = box['num']
                 area_cfg = box.get('area_cfg', 1)
+                box_type_cfg = box.get('box_type', rp.box_type)
                 # 断点续传：先存游标后发送（断电宁可漏一抓也不重码）
                 cur_box_id = box['id']
                 if store and not off_line_mode and resume_save:
                     store.save_cursor(rp_idx, cur_box_id, cur_path_id)
-                server.send_message(_build_msg(1, _data_block(float(box_cfg), float(int(rp.box_type)), float(area_cfg)) + b'\x00\x00'))
+                server.send_message(_build_msg(1, _data_block(
+                    float(box_cfg), float(int(box_type_cfg)), float(area_cfg)
+                ) + b'\x00\x00'))
                 logs.debug(f'来料箱子配方号：{box_cfg}，位置编号：{area_cfg}，动作标志：{box["action"]}')
             elif mes_hex == cmd_get_path:
             # 单次路径点
@@ -547,7 +554,7 @@ def main():
                     chk_value = 0   # 同样退出批量预取
                     continue
                 last_grab_action = action          # 记录当前抓，供随后 cmd_stacking 对齐序号
-                last_grab_box_type = rp.box_type   # 同时记录所属 block 箱型（此时 rp 未切换）
+                last_grab_box_type = action.get('box_type', rp.box_type)
                 # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
                 cur_path_id = action['id']
                 if store and not off_line_mode and resume_save:
@@ -586,7 +593,7 @@ def main():
                         _y_start       = action['pos'][1]
                         _y_grip_right  = _y_start + sum(action['num']) * action['size'][2]  # p3 y步长=h
                         _cur_h         = action['pos'][2]
-                        _p3_right_wall = rp.W - rp.RW
+                        _p3_right_wall = rp.W
                         def _phys_right_p3(a):
                             return a['pos'][1] + sum(a['num']) * a['size'][2] + sum(a.get('gaps', []))
                         _placed_p3 = [a for a in rp.ori_offsets
@@ -609,7 +616,11 @@ def main():
                         x0 = [config_be['p1_init_pos'][0], config_be['p1_init_pos'][1], max(config_be['p1_init_pos'][2]-box_z, x_app[2])]
                     else:
                         if action['area'] == 'p1':
-                            x0 = [config_be['p1_init_pos'][0], max(rp.W-(rp.grab_num_p1+1)*rp.w, x_app[1]), max(config_be['p3_init_pos'][2]-box_z, x_app[2])]
+                            _action_grab_p1 = action.get('grab_num_p1', rp.grab_num_p1)
+                            _action_box_w = action['size'][1]
+                            x0 = [config_be['p1_init_pos'][0],
+                                  max(rp.W - (_action_grab_p1 + 1) * _action_box_w, x_app[1]),
+                                  max(config_be['p3_init_pos'][2]-box_z, x_app[2])]
                         else:
                             x0 = [config_be['p3_init_pos'][0], config_be['p3_init_pos'][1], max(config_be['p3_init_pos'][2]-box_z, x_app[2])]
                     # x0[2] = x0[2]-box_z
@@ -619,7 +630,7 @@ def main():
                     if action['pos'][2]+box_z < config_be['p3_init_pos'][2]:
                         if action['dir'] == 1:
                             x1 = [x0[0],
-                                x_app[1] + rp.w/2 if (action['pos'][1] < action['size'][1]) and (action['pos'][2] <= 2*box_z) else x_app[1],
+                                x_app[1] + action['size'][1]/2 if (action['pos'][1] < action['size'][1]) and (action['pos'][2] <= 2*box_z) else x_app[1],
                                 x0[2]]
                         else:
                             x1 = [x0[0],
@@ -644,7 +655,7 @@ def main():
                                 action['pos'][1] + config_be['p1_app_offset_list'][0][1],
                                 action['pos'][2] + config_be['p1_app_offset_list'][0][2]])
                     x1 = tuple([config_be['p2_init_pos'][0],
-                                x_app[1] - rp.w,
+                                x_app[1] - action['size'][1],
                                 max(config_be['p2_init_pos'][2], x_app[2]+10)])
                     x0 = x1
                     size = (boxs[0].length * 4, boxs[0].width, boxs[0].height + reserve_grip[2])
@@ -850,14 +861,23 @@ def main():
                     # 当前抓箱子总宽度：箱数 × 单箱宽（p3侧立时宽度方向为h=size[2]，p1为w=size[1]）
                     # 用 last_grab_action 自带的 size/箱型（多 block 边界后 rp 已切换，不能用 rp.w/h/box_type）
                     # 保护：未触发过 get_path（无当前抓）时理论宽度发 -1，仍照常测量并上报实测
+                    _rel_top_h = None    # 当前行顶面距地板高度(米)，供测宽锁定当前行 Z
+                    _box_h_m = None      # 当前抓箱子竖向高度(米)
                     if last_grab_action is None or last_grab_action == 'done':
                         _grab_width = -1
-                        _box_type = rp.box_type
+                        _box_type = (rp.robot_offsets[0].get('box_type', rp.box_type)
+                                     if rp.robot_offsets and rp.robot_offsets[0] != 'done'
+                                     else rp.box_type)
                     else:
                         _cur = last_grab_action
                         _n = sum(_cur['num'])
                         _grab_width = _n * (_cur['size'][2] if _cur['area'] == 'p3' else _cur['size'][1])
                         _box_type = last_grab_box_type
+                        # 当前行高度：pos[2] 为放置点底面距地板高度(mm)，加箱竖向跨度=顶面相对高度
+                        # p3 侧立时竖向跨度为原始宽 size[1]，p1 竖放时为原始高 size[2]
+                        _box_vspan = _cur['size'][1] if _cur['area'] == 'p3' else _cur['size'][2]
+                        _rel_top_h = (_cur['pos'][2] + _box_vspan) / 1000.0
+                        _box_h_m = _box_vspan / 1000.0
                     _t0 = time.time()
                     pc1, pc2 = collect_dual_lidar_once('/lidar/JT128_1', '/lidar/JT128_2', frames=3)
                     t_collect = time.time() - _t0
@@ -872,7 +892,8 @@ def main():
                         _t1 = time.time()
                         # 偏航补偿角：由该抓所属 block 箱型对应的拍照位 J1 与正对 J1 之差决定
                         _yaw_off = _yaw_offset_for_box(_box_type)
-                        measured = check_stacking(_grab_width, pc1, pc2, yaw_offset_deg=_yaw_off)
+                        measured = check_stacking(_grab_width, pc1, pc2, yaw_offset_deg=_yaw_off,
+                                                  rel_top_h=_rel_top_h, box_h=_box_h_m)
                         t_compute = time.time() - _t1
                         if measured is None:
                             # 宽度计算失败：发送 status=2（不再依赖异常兜底）
@@ -886,7 +907,10 @@ def main():
                                       f'测量宽度={measured:.1f}mm，发送 status=1')
                 except Exception as _e:
                     logs.error(f'堆叠检测异常：{type(_e).__name__}: {_e}')
-                    server.send_message(_build_msg(1, _data_block(2.0, 0.0, 0.0) + b'\x00\x00'))
+                    try:
+                        server.send_message(_build_msg(1, _data_block(2.0, 0.0, 0.0) + b'\x00\x00'))
+                    except Exception as _e2:
+                        logs.error(f'堆叠检测异常兜底发送也失败（机器人可能已断连）：{type(_e2).__name__}: {_e2}')
                 # 点云保存（不影响已发送结果；只要采到点云就保存便于事后分析）
                 if pc1 is not None and pc2 is not None:
                     try:

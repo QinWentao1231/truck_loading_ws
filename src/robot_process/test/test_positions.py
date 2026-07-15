@@ -35,7 +35,7 @@ def make_config(stack, group):
             'Group': group,
         }],
         'trapezoid': [],
-        'head': [],
+        'mixture': [],
     }
 
 

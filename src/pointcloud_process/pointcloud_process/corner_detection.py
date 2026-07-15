@@ -5,6 +5,50 @@ import time
 import copy
 
 
+# 0630 车厢内 9 份点云的地面法向 Ry 中位数，作为固定零点。
+# method=4 时返回相对该零点的 Ry；method=1/2/3 始终返回 Ry=0。
+RY_INTERIOR_BASELINE_DEG = 0.03
+RY_OUTPUT_DEADBAND_DEG = 0.2
+
+
+def _wrap_angle_deg(angle):
+    """将角度归一化到 [-180, 180)。"""
+    return (float(angle) + 180.0) % 360.0 - 180.0
+
+
+def relative_ry_from_0630_baseline(raw_ry_deg):
+    """返回相对 0630 车厢内固定零点的 Ry 变化。"""
+    delta = _wrap_angle_deg(raw_ry_deg - RY_INTERIOR_BASELINE_DEG)
+    return 0.0 if abs(delta) < RY_OUTPUT_DEADBAND_DEG else delta
+
+
+def ry_from_ground_normal(ground_model, lidar_to_base):
+    """仅由地面法向计算机器人基坐标系下的绝对 Ry（度）。
+
+    ground_model 在角点算法中被统一为向下法向，因此取反向得到“上”向量；
+    只用外参旋转部分转到机器人基坐标，避免垛面倾斜和箱体边缘污染 Ry。
+    """
+    normal = np.asarray(ground_model[:3], dtype=float)
+    norm = np.linalg.norm(normal)
+    if norm == 0:
+        raise ValueError("地面法向为零，无法计算 Ry")
+    up_lidar = -normal / norm
+    up_base = np.asarray(lidar_to_base[:3, :3], dtype=float) @ up_lidar
+    up_base /= np.linalg.norm(up_base)
+    return math.degrees(math.atan2(up_base[0], up_base[2]))
+
+
+def fixed_axis_plane(model, axis, sign):
+    """保留平面在主轴上的交点，将法向固定为指定坐标轴方向。"""
+    coefficient = float(model[axis])
+    if abs(coefficient) < 1e-6:
+        raise ValueError(f"平面在轴 {axis} 上的法向分量过小，无法固定法向")
+    coordinate = -float(model[3]) / coefficient
+    normal = [0.0, 0.0, 0.0]
+    normal[axis] = float(sign)
+    return [normal[0], normal[1], normal[2], -float(sign) * coordinate]
+
+
 def process_point_cloud(pcd, method):
     # #保存pcd点云到路径
     # target_file_path = "/home/simplenav/Test_ws/corn_poits.pcd"
@@ -237,7 +281,8 @@ def process_point_cloud(pcd, method):
     view = False
     view_normal = False
     corner_list = []
-    method = method  # 1: 车头波纹板情况；2：I垛面情况; 3: L垛面情况。
+    # 1: 车头波纹板；2: I垛面；3: L垛面；
+    # 4: I垛面角点，并根据地面法向返回相对车厢内基准的 Ry。
     print(f'method: {method}')
     down_pcd = pcd
     if view:
@@ -262,7 +307,7 @@ def process_point_cloud(pcd, method):
     normals = np.asarray(filtered_pcd.normals)
     points = np.asarray(filtered_pcd.points)
 
-    if method == 1 or method == 2:
+    if method in (1, 2, 4):
         flip_mask = normals[:, 0] < 0
         normals[flip_mask] *= -1
         filtered_pcd.normals = o3d.utility.Vector3dVector(normals)
@@ -369,7 +414,7 @@ def process_point_cloud(pcd, method):
             vis.run()
             vis.destroy_window()
     else:
-        raise Exception('Wrong method value')
+        raise Exception(f'Wrong method value: {method}; expected 1, 2, 3, or 4')
 
     # 左侧面点云滤波
     flip_mask = (normals[:, 1] * points[:, 1]) < 0
@@ -509,7 +554,29 @@ def process_point_cloud(pcd, method):
     angle_threshold = np.cos(np.radians(10))
     ground_indices = np.where(cos_theta > angle_threshold)[0]
     ground_points = np.asarray(filtered_pcd.points)[ground_indices]
-    ground_points = ground_points[(ground_points[:, 2] < -0.7) & (ground_points[:, 0] > 1.0)]
+    # 地面 z 会随雷达安装/外参变化，不使用固定 z 阈值。
+    # 从较低 40% 的水平候选点中找最密集的 10mm 高度峰，
+    # 再取该高度 ±60mm 带宽拟合局部地面。
+    # 不复用前/左/右平面筛选过程中被多次翻转过的 normals；直接从空间 ROI
+    # 的低位高度峰提取地面，再由独立 RANSAC 确定法向。
+    ground_candidates = points[points[:, 0] > 1.0]
+    if len(ground_candidates) < 30:
+        raise ValueError(f"地面水平候选点不足: {len(ground_candidates)}")
+    z_values = ground_candidates[:, 2]
+    z_upper = float(np.percentile(z_values, 40))
+    z_low = z_values[z_values <= z_upper]
+    z_min, z_max = float(z_low.min()), float(z_low.max())
+    if z_max - z_min < 0.01:
+        ground_z = float(np.median(z_low))
+    else:
+        bin_count = max(1, int(np.ceil((z_max - z_min) / 0.01)))
+        hist, edges = np.histogram(z_low, bins=bin_count)
+        peak = int(hist.argmax())
+        ground_z = float((edges[peak] + edges[peak + 1]) * 0.5)
+    ground_points = ground_candidates[
+        np.abs(ground_candidates[:, 2] - ground_z) <= 0.06]
+    if len(ground_points) < 30:
+        raise ValueError(f"动态地面高度带内点数不足: {len(ground_points)}")
     ground_pcd = o3d.geometry.PointCloud()
     ground_pcd.points = o3d.utility.Vector3dVector(ground_points)
     # ground_pcd = fiterCloud(ground_pcd)
@@ -520,6 +587,7 @@ def process_point_cloud(pcd, method):
         vis.add_geometry(ground_pcd)
         vis.run()
         vis.destroy_window()
+    o3d.utility.random.seed(0)
     [a, b, c, d], ground_inliers, ground_outliers = segment_plane(ground_pcd)
     if c > 0:
         a, b, c, d = -a, -b, -c, -d
@@ -570,11 +638,22 @@ def process_point_cloud(pcd, method):
                            [0.021, 0.000, 0.999, -392.580],
                            [0.000, 0.000, 0.000, 1.000]])
 
-    if method == 2 or method == 1:
-        corner_point1 = intersection_of_planes([i_model[0], i_model[1], i_model[2], i_model[3]],
-                                               ground_model, side_left_model)
-        corner_point2 = intersection_of_planes([i_model[0], i_model[1], i_model[2], i_model[3]],
-                                               ground_model, side_right_model)
+    # 角点位置始终由固定法向的三个平面求交：
+    # 前面 +X，左/右面 ±Y，底面 -Z。实测地面法向只用于 method=4 的 Ry，
+    # 不反向修改左右角点坐标。
+    measured_ground_model = list(ground_model)
+    ground_position_model = fixed_axis_plane(ground_model, axis=2, sign=-1)
+    front_position_model = fixed_axis_plane(i_model, axis=0, sign=1)
+    side_left_position_model = fixed_axis_plane(side_left_model, axis=1, sign=1)
+    side_right_position_model = fixed_axis_plane(side_right_model, axis=1, sign=-1)
+    front_right_position_model = (
+        fixed_axis_plane(l_model, axis=0, sign=1) if method == 3 else None)
+
+    if method in (1, 2, 4):
+        corner_point1 = intersection_of_planes(front_position_model,
+                                               ground_position_model, side_left_position_model)
+        corner_point2 = intersection_of_planes(front_position_model,
+                                               ground_position_model, side_right_position_model)
         o_be = np.array([(corner_point2[0] - corner_point1[0]),
                          (corner_point2[1] - corner_point1[1]),
                          (corner_point2[2] - corner_point1[2])])
@@ -598,7 +677,7 @@ def process_point_cloud(pcd, method):
         # corner_point1[0] = min(corner_point1[0], corner_point2[0])
         if method == 1:
             corner_point1[0] -= 0.08
-        a_re = [-ground_model[0], -ground_model[1], -ground_model[2]]
+        a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
         corner_point1_m = np.array([[n_re[0], o_re[0], a_re[0], corner_point1[0] * 1000],
                                     [n_re[1], o_re[1], a_re[1], corner_point1[1] * 1000],
@@ -614,6 +693,11 @@ def process_point_cloud(pcd, method):
         point2_m = lid2base_m @ corner_point2_m
         point1 = matrix2euler(point1_m)
         point2 = matrix2euler(point2_m)
+        if method == 4:
+            raw_ry = ry_from_ground_normal(measured_ground_model, lid2base_m)
+            point1[4] = relative_ry_from_0630_baseline(raw_ry)
+        else:
+            point1[4] = 0.0
         corner_list.append(point1)
         corner_list.append(point2)
         print(f'corner1 in lidar: x: {corner_point1[0] * 1000:.3f}, '
@@ -637,10 +721,10 @@ def process_point_cloud(pcd, method):
             vis.destroy_window()
 
     if method == 3:
-        corner_point1 = intersection_of_planes([i_model[0], i_model[1], i_model[2], i_model[3]],
-                                               ground_model, side_left_model)
-        corner_point4 = intersection_of_planes([i_model[0], i_model[1], i_model[2], i_model[3]],
-                                               ground_model, side_right_model)
+        corner_point1 = intersection_of_planes(front_position_model,
+                                               ground_position_model, side_left_position_model)
+        corner_point4 = intersection_of_planes(front_position_model,
+                                               ground_position_model, side_right_position_model)
         o_be = np.array([(corner_point4[0] - corner_point1[0]),
                          (corner_point4[1] - corner_point1[1]),
                          (corner_point4[2] - corner_point1[2])])
@@ -662,14 +746,14 @@ def process_point_cloud(pcd, method):
         else:
             o_re = o_be
         # corner_point1[0] = min(corner_point1[0], corner_point4[0])
-        a_re = [-ground_model[0], -ground_model[1], -ground_model[2]]
+        a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
         corner_point1_m = np.array([[n_re[0], o_re[0], a_re[0], corner_point1[0] * 1000],
                                     [n_re[1], o_re[1], a_re[1], corner_point1[1] * 1000],
                                     [n_re[2], o_re[2], a_re[2], corner_point1[2] * 1000],
                                     [0, 0, 0, 1]])
-        corner_point4 = intersection_of_planes([l_model[0], l_model[1], l_model[2], l_model[3]],
-                                               ground_model, side_right_model)
+        corner_point4 = intersection_of_planes(front_right_position_model,
+                                               ground_position_model, side_right_position_model)
         corner_point4_m = np.array([[0, 0, 0, corner_point4[0] * 1000],
                                     [0, 0, 0, corner_point4[1] * 1000],
                                     [0, 0, 0, corner_point4[2] * 1000],
@@ -693,6 +777,7 @@ def process_point_cloud(pcd, method):
         point2 = matrix2euler(point2_m)
         point3 = matrix2euler(point3_m)
         point4 = matrix2euler(point4_m)
+        point1[4] = 0.0
         corner_list.append(point1)
         corner_list.append(point2)
         corner_list.append(point3)
@@ -715,6 +800,7 @@ def process_point_cloud(pcd, method):
               f'z: {corner_point4[2] * 1000:.3f}')
         print(f'corner4 in robot base: x: {point4[0]:.3f}, y: {point4[1]:.3f}, z: {point4[2]:.3f}')
     end_time = time.time()
+    print(f'corner_list return: {corner_list}')
     print(f'cost time: {(end_time - start_time):.2f}')
     return corner_list
 
