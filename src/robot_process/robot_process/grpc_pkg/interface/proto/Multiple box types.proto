@@ -63,16 +63,19 @@ message Regular{
 }
 
 message Mixture{
-    int32 Na = 1;
-    int32 Ta = 2;
-    int32 Fa = 3;
-    int32 Nax = 4;
-    int32 Tax = 5;
-    int32 Nb = 6;
-    int32 Tb = 7;
-    int32 Fb = 8;
-    int32 Nbx = 9;
-    int32 Tbx = 10;
+    repeated MixtureItem Items = 1;
+}
+
+message MixtureItem{
+    string Type = 1;
+    int32 Num = 2;
+    Position Pos = 3;
+}
+
+message Position{
+    float X = 1; // 沿车厢深度方向
+    float Y = 2; // 沿车厢宽度方向
+    float Z = 3; // 沿车厢高度方向
 }
 
 message Trapezoid{

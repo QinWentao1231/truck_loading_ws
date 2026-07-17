@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-// 订单条件总包
+// 运单条件总包
 message Condition{
     CarCondition car = 1; // 车辆条件
-    repeated OrderCondition orders = 2; // 子订单条件
-    Limitation limit = 3; // 订单限制
+    repeated OrderCondition orders = 2; // 出库单条件
+    Limitation limit = 3; // 运单限制
 }
 
 // 车辆条件
@@ -24,8 +24,8 @@ message Size{
 
 // 子订单条件
 message OrderCondition{
-    string orderId = 1; // 子订单号
-    repeated BoxCondition boxes = 2; // 箱型信息
+    string orderId = 1; // 出库单地址
+    repeated BoxCondition boxes = 2; // 合同箱型信息
 }
 
 // 箱型信息
@@ -35,6 +35,8 @@ message BoxCondition{
     Size reserve = 3; // 箱型冗余尺寸
     Grip grip = 4; // 抓取参数
     int32 Nt = 5; // 总个数
+    string contractId = 6; //合同号
+    string materialId = 7; //物料代号
 }
 
 // 抓取参数(单抓个数和单次抓取时间)

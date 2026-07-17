@@ -119,21 +119,60 @@ def _parse_trapezoid(src_list):
     return result
 
 
+def _proto_mixture_items(face):
+    """返回 protobuf 混装面的 Items 列表。"""
+    return getattr(face, 'Items', ())
+
+
 def _parse_mixture(src_list):
-    """解析 Mixture 列表，保留上下两种箱型各自的层型与抓取分组。"""
+    """解析 Mixture.Items/Pos 列表。"""
     result = []
-    for item in src_list:
-        if item.NA == 0 and item.NB == 0:
-            continue
-        result.append({
-            'NA': item.NA, 'TA': item.TA,
-            'StackA': [list(x.Width) for x in item.StackA],
-            'GroupA': [list(x.Unit) for x in item.GroupA],
-            'TypeA': item.TypeA, 'TypeB': item.TypeB,
-            'NB': item.NB, 'Tb': item.Tb,
-            'StackB': [list(x.Width) for x in item.StackB],
-            'GroupB': [list(x.Unit) for x in item.GroupB],
-        })
+    for face in src_list:
+        items = _proto_mixture_items(face)
+        parsed_items = []
+        for item in items:
+            parsed_items.append({
+                'Type': item.Type,
+                'Num': item.Num,
+                'Pos': {'X': item.Pos.X, 'Y': item.Pos.Y, 'Z': item.Pos.Z},
+            })
+        result.append({'Items': parsed_items})
+    return result
+
+
+def _json_mixture_items(face):
+    """返回 JSON 混装面的 Items 列表。"""
+    for key in ('Items', 'items'):
+        if key in face:
+            return face[key]
+    return None
+
+
+def _json_value(data, upper_name, default=None):
+    """读取 Type/type、Num/num、Pos/pos、X/x 等大小写形式。"""
+    return data.get(upper_name, data.get(upper_name.lower(), default))
+
+
+def _parse_mixture_json(src_list):
+    """将规划器 JSON 的 Mixture.Items/Pos 转为内部字典。"""
+    result = []
+    for face in src_list:
+        items = _json_mixture_items(face)
+        if items is None:
+            raise ValueError("Mixture 缺少 Items 字段")
+        parsed_items = []
+        for item in items:
+            pos = _json_value(item, 'Pos', {}) or {}
+            parsed_items.append({
+                'Type': _json_value(item, 'Type', ''),
+                'Num': _json_value(item, 'Num', 0),
+                'Pos': {
+                    'X': _json_value(pos, 'X', 0.0),
+                    'Y': _json_value(pos, 'Y', 0.0),
+                    'Z': _json_value(pos, 'Z', 0.0),
+                },
+            })
+        result.append({'Items': parsed_items})
     return result
 
 
@@ -180,10 +219,16 @@ def parse_planner_json(data: dict):
             all_items = blk.get('regular', []) + blk.get('trapezoid', []) + blk.get('mixture', [])
             blk_types = []
             for x in all_items:
-                for key in ('Type', 'TypeA', 'TypeB'):
+                for key in ('Type',):
                     t = x.get(key, '')
                     if t and t not in blk_types:
                         blk_types.append(t)
+                mixture_items = _json_mixture_items(x)
+                if mixture_items is not None:
+                    for mixture_item in mixture_items:
+                        t = _json_value(mixture_item, 'Type', '')
+                        if t and t not in blk_types:
+                            blk_types.append(t)
             box_dict = {t: type_map[t] for t in blk_types if t in type_map}
             box_info = {'box_list': blk_types, 'box': box_dict}
 
@@ -217,20 +262,7 @@ def parse_planner_json(data: dict):
                     'Group': [list(x['Unit'])  for x in item.get('Group', [])],
                 })
 
-            # mixture：保留 A/B 两种箱型各自的层型与抓取分组
-            mixture = []
-            for item in blk.get('mixture', []):
-                if item.get('NA', 0) == 0 and item.get('NB', 0) == 0:
-                    continue
-                mixture.append({
-                    'NA': item.get('NA', 0), 'TA': item.get('TA', 0),
-                    'StackA': [list(x['Width']) for x in item.get('StackA', [])],
-                    'GroupA': [list(x['Unit']) for x in item.get('GroupA', [])],
-                    'TypeA': item.get('TypeA', ''), 'TypeB': item.get('TypeB', ''),
-                    'NB': item.get('NB', 0), 'Tb': item.get('Tb', 0),
-                    'StackB': [list(x['Width']) for x in item.get('StackB', [])],
-                    'GroupB': [list(x['Unit']) for x in item.get('GroupB', [])],
-                })
+            mixture = _parse_mixture_json(blk.get('mixture', []))
 
             glob_data.append({
                 'box_list':  box_info['box_list'],
@@ -282,9 +314,15 @@ def callback(data):
             all_items = list(blk.regular) + list(blk.trapezoid) + list(blk.mixture)
             blk_types = []
             for x in all_items:
-                for t in [getattr(x, 'Type', ''), getattr(x, 'TypeA', ''), getattr(x, 'TypeB', '')]:
+                for t in [getattr(x, 'Type', '')]:
                     if t and t not in blk_types:
                         blk_types.append(t)
+                mixture_items = _proto_mixture_items(x)
+                if mixture_items is not None:
+                    for mixture_item in mixture_items:
+                        t = getattr(mixture_item, 'Type', getattr(mixture_item, 'type', ''))
+                        if t and t not in blk_types:
+                            blk_types.append(t)
             box_dict = {t: type_map[t] for t in blk_types if t in type_map}
             box_info = {'box_list': blk_types, 'box': box_dict}
             glob_data.append({
@@ -449,7 +487,7 @@ def main():
         chk_value = 0
         # last_grab_action: get_path 刚下发的那一抓，供 cmd_stacking 计算"当前抓"宽度
         # （cmd_stacking 在 get_path 之后触发，robot_offsets[0] 已是下一抓，不能用）
-        # last_grab_box_type: 那一抓的实际箱型（Mixture 内可在 TypeA/TypeB 间切换）
+        # last_grab_box_type: 那一抓的实际箱型（Mixture 内可按 Items 切换）
         last_grab_action = None
         last_grab_box_type = None
         # cur_box_id/cur_path_id: 当前已下发的 box/path 抓号，每次"先存后发"写入游标

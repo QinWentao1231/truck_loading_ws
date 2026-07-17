@@ -22,6 +22,14 @@ SPECIAL_FRONT_MIN_PLANE_POINTS = 300
 SPECIAL_FRONT_MIN_HEIGHT_M = 0.60
 SPECIAL_FRONT_MIN_WIDTH_M = 0.08
 SPECIAL_FRONT_MIN_INLIER_RATIO = 0.45
+SIDE_ANGLE_MIN_X_M = 0.0
+SIDE_ANGLE_FRONT_MARGIN_M = 0.03
+SIDE_ANGLE_Y_HALF_BAND_M = 0.08
+SIDE_ANGLE_MIN_Z_M = -0.5
+SIDE_ANGLE_MAX_Z_M = 1.0
+SIDE_ANGLE_X_BIN_WIDTH_M = 0.05
+SIDE_ANGLE_MIN_BIN_POINTS = 100
+SIDE_ANGLE_MIN_BINS = 10
 
 
 class CornerDetectionCandidateError(ValueError):
@@ -166,6 +174,83 @@ def fixed_axis_plane(model, axis, sign):
     normal = [0.0, 0.0, 0.0]
     normal[axis] = float(sign)
     return [normal[0], normal[1], normal[2], -float(sign) * coordinate]
+
+
+def expanded_side_direction_angle_to_x(points, reference_y, front_x,
+                                       side_name):
+    """在雷达到垛面之间按X分箱，稳健估计侧壁水平走向。"""
+    cloud_points = np.asarray(points, dtype=float)
+    max_x = float(front_x) - SIDE_ANGLE_FRONT_MARGIN_M
+    if max_x <= SIDE_ANGLE_MIN_X_M:
+        raise CornerDetectionCandidateError(
+            f"{side_name}扩大角度范围无效: "
+            f"[{SIDE_ANGLE_MIN_X_M:.3f}, {max_x:.3f}]m")
+    candidate_mask = (
+        np.isfinite(cloud_points).all(axis=1) &
+        (cloud_points[:, 0] >= SIDE_ANGLE_MIN_X_M) &
+        (cloud_points[:, 0] <= max_x) &
+        (np.abs(cloud_points[:, 1] - reference_y) <=
+         SIDE_ANGLE_Y_HALF_BAND_M) &
+        (cloud_points[:, 2] >= SIDE_ANGLE_MIN_Z_M) &
+        (cloud_points[:, 2] <= SIDE_ANGLE_MAX_Z_M)
+    )
+    candidate_points = cloud_points[candidate_mask]
+    require_candidate_values(
+        candidate_points, f"{side_name}扩大角度候选",
+        min_values=MIN_PLANE_CANDIDATE_POINTS)
+
+    edges = np.arange(
+        SIDE_ANGLE_MIN_X_M,
+        max_x + SIDE_ANGLE_X_BIN_WIDTH_M * 1.5,
+        SIDE_ANGLE_X_BIN_WIDTH_M)
+    representatives = []
+    for x_low, x_high in zip(edges[:-1], edges[1:]):
+        bin_mask = (
+            (candidate_points[:, 0] >= x_low) &
+            (candidate_points[:, 0] < x_high))
+        bin_points = candidate_points[bin_mask]
+        if len(bin_points) < SIDE_ANGLE_MIN_BIN_POINTS:
+            continue
+        representatives.append([
+            float(np.median(bin_points[:, 0])),
+            float(np.median(bin_points[:, 1]))])
+    representatives = np.asarray(representatives, dtype=float)
+    require_candidate_values(
+        representatives, f"{side_name}扩大角度X分箱",
+        min_values=SIDE_ANGLE_MIN_BINS)
+
+    keep_mask = np.ones(len(representatives), dtype=bool)
+    for _ in range(5):
+        slope, intercept = np.polyfit(
+            representatives[keep_mask, 0],
+            representatives[keep_mask, 1], 1)
+        residuals = (
+            representatives[:, 1] -
+            (slope * representatives[:, 0] + intercept))
+        residual_median = float(np.median(residuals[keep_mask]))
+        residual_mad = float(np.median(np.abs(
+            residuals[keep_mask] - residual_median)))
+        residual_limit = max(0.008, 3.0 * 1.4826 * residual_mad)
+        next_keep_mask = (
+            np.abs(residuals - residual_median) <= residual_limit)
+        if next_keep_mask.sum() < SIDE_ANGLE_MIN_BINS:
+            break
+        if np.array_equal(next_keep_mask, keep_mask):
+            keep_mask = next_keep_mask
+            break
+        keep_mask = next_keep_mask
+    slope, _ = np.polyfit(
+        representatives[keep_mask, 0],
+        representatives[keep_mask, 1], 1)
+    signed_angle = math.degrees(math.atan(float(slope)))
+    return {
+        "angle": signed_angle,
+        "candidate_points": len(candidate_points),
+        "used_bins": int(keep_mask.sum()),
+        "total_bins": len(representatives),
+        "min_x": SIDE_ANGLE_MIN_X_M,
+        "max_x": max_x,
+    }
 
 
 def _refine_plane_model(points):
@@ -577,6 +662,7 @@ def _process_point_cloud_impl(pcd, method):
     start_time = time.time()
     global view
     view =  True
+    debug = view
     view_normal = False
     corner_list = []
     # 1: 车头波纹板；2: I垛面；3: L垛面；
@@ -611,6 +697,8 @@ def _process_point_cloud_impl(pcd, method):
         vis.add_geometry(display_pcd, reset_bounding_box=True)
         vis.run()
         vis.destroy_window()
+
+    side_angle_source_points = np.asarray(down_pcd.points)
 
     # 垛面点云直通滤波
     points = np.asarray(down_pcd.points)
@@ -1313,6 +1401,57 @@ def _process_point_cloud_impl(pcd, method):
               f'y: {corner_point4[1] * 1000:.3f},'
               f'z: {corner_point4[2] * 1000:.3f}')
         print(f'corner4 in robot base: x: {point4[0]:.3f}, y: {point4[1]:.3f}, z: {point4[2]:.3f}')
+    # 扩大范围的侧壁方向仅用于调试打印，放在全部角点计算完成后执行，
+    # 不参与也不改变前面用于角点求交的侧壁模型。
+    if debug:
+        try:
+            left_reference_point = np.median(left_wall_points, axis=0)
+            right_reference_point = np.median(right_wall_points, axis=0)
+            left_reference_y = -(
+                side_left_model[0] * left_reference_point[0] +
+                side_left_model[2] * left_reference_point[2] +
+                side_left_model[3]) / side_left_model[1]
+            right_reference_y = -(
+                side_right_model[0] * right_reference_point[0] +
+                side_right_model[2] * right_reference_point[2] +
+                side_right_model[3]) / side_right_model[1]
+            left_front_x = -(
+                i_model[1] * left_reference_y +
+                i_model[2] * left_reference_point[2] +
+                i_model[3]) / i_model[0]
+            right_front_model = l_model if method == 3 else i_model
+            right_front_x = -(
+                right_front_model[1] * right_reference_y +
+                right_front_model[2] * right_reference_point[2] +
+                right_front_model[3]) / right_front_model[0]
+            left_angle_debug = expanded_side_direction_angle_to_x(
+                side_angle_source_points, left_reference_y,
+                left_front_x, "左侧面")
+            right_angle_debug = expanded_side_direction_angle_to_x(
+                side_angle_source_points, right_reference_y,
+                right_front_x, "右侧面")
+            left_angle = left_angle_debug["angle"]
+            right_angle = right_angle_debug["angle"]
+            print(
+                f'侧面方向与+X轴夹角(扩大范围): '
+                f'左={abs(left_angle):.3f}° '
+                f'(方向角{left_angle:+.3f}°, '
+                f'X={left_angle_debug["min_x"]:.2f}~'
+                f'{left_angle_debug["max_x"]:.2f}m, '
+                f'点数={left_angle_debug["candidate_points"]}, '
+                f'分箱={left_angle_debug["used_bins"]}/'
+                f'{left_angle_debug["total_bins"]}), '
+                f'右={abs(right_angle):.3f}° '
+                f'(方向角{right_angle:+.3f}°, '
+                f'X={right_angle_debug["min_x"]:.2f}~'
+                f'{right_angle_debug["max_x"]:.2f}m, '
+                f'点数={right_angle_debug["candidate_points"]}, '
+                f'分箱={right_angle_debug["used_bins"]}/'
+                f'{right_angle_debug["total_bins"]})'
+            )
+        except (CornerDetectionCandidateError, ValueError,
+                np.linalg.LinAlgError) as exc:
+            print(f'侧面扩大范围角度计算失败（不影响角点）: {exc}')
     end_time = time.time()
     print(f'cost time: {(end_time - start_time):.2f}')
     return corner_list
@@ -1328,6 +1467,6 @@ def process_point_cloud(pcd, method):
         return []
 
 
-file_path = "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/pcd_logs/trun_cloud_20260714_141258.pcd"
+file_path = "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/pcd_logs/0716/trun_cloud_20260716_101157_slow1.pcd"
 pcd = o3d.io.read_point_cloud(file_path)
-process_point_cloud(pcd, 5)
+process_point_cloud(pcd, 2)

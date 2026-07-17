@@ -1,8 +1,19 @@
 import copy
 import logging
+import math
 from collections import defaultdict
 
 _logger = logging.getLogger(__name__)
+
+
+def _mixture_items(mixture_face):
+    """返回 Mixture 的放置信息列表。"""
+    return mixture_face.get('Items', mixture_face.get('items', []))
+
+
+def _mixture_box_count(mixture_face):
+    return sum(item.get('Num', item.get('num', 0))
+               for item in _mixture_items(mixture_face))
 
 
 class Box:
@@ -88,9 +99,7 @@ class RobotPosition:
             sum(r['N1'] * r['T12'] * r['F13'] + r['N2'] * r['T12'] * r['F2']
                 + r['N3'] * r['T3'] * r['F13'] + r['Nx'] for r in self.regular)
             + sum(x['N1'] * x['T1'] + x['N3'] * x['T3'] + x['Nx'] for x in self.trapezoid)
-            + sum(y.get('NA', y.get('N1', 0)) * y.get('TA', y.get('T1', 0))
-                  + y.get('NB', y.get('N3', 0)) * y.get('Tb', y.get('T3', 0))
-                  for y in self.mixture))
+            + sum(_mixture_box_count(y) for y in self.mixture))
 
         # robot_offsets: 运行时抓取队列；ori_offsets: 完整快照（间隙计算用）
         # boxes: 来料配方队列（与robot_offsets一一对应，供cmd_get_box消费）
@@ -452,61 +461,67 @@ class RobotPosition:
             self.boxes[-1]['action'] = 1
 
     def _parse_mixture(self):
-        """混装面：一面内全部按 P1 放置，下方 A 箱型完成收尾，上方 B 箱型接续。"""
+        """混装面：按 Items 中给出的箱型、数量和 Pos 直接生成放置动作。"""
         for face_idx, mix in enumerate(self.mixture):
             num_F = face_idx + 1
-            z_base = 0
             emitted_before = len(self.robot_offsets)
-            parts = (
-                ('A', mix.get('NA', mix.get('N1', 0)),
-                 mix.get('TA', mix.get('T1', 0)), mix.get('TypeA', ''),
-                 mix.get('StackA', mix.get('Stack', [])),
-                 mix.get('GroupA', mix.get('Group', []))),
-                ('B', mix.get('NB', mix.get('N3', 0)),
-                 mix.get('Tb', mix.get('T3', 0)), mix.get('TypeB', ''),
-                 mix.get('StackB', []), mix.get('GroupB', [])),
-            )
-            for label, n_row, n_layers, box_type, stacks, groups in parts:
-                if n_row == 0 and n_layers == 0:
-                    continue
-                if n_row <= 0 or n_layers <= 0:
+
+            items = _mixture_items(mix)
+            for item_idx, item in enumerate(items):
+                box_type = item.get('Type', item.get('type', ''))
+                num = item.get('Num', item.get('num', 0))
+                pos = item.get('Pos', item.get('pos', {})) or {}
+                try:
+                    num = int(num)
+                    pos_x = float(pos.get('X', pos.get('x', 0.0)))
+                    pos_y = float(pos.get('Y', pos.get('y', 0.0)))
+                    pos_z = float(pos.get('Z', pos.get('z', 0.0)))
+                except (TypeError, ValueError) as exc:
                     raise ValueError(
-                        f"Mixture {label} 区参数不完整：N={n_row}, T={n_layers}")
+                        f"Mixture 面{num_F}第{item_idx + 1}项数值格式错误") from exc
+
                 if not box_type:
-                    raise ValueError(f"Mixture {label} 区缺少箱型 Type{label}")
-                if not stacks or not groups:
-                    raise ValueError(f"Mixture {label} 区缺少 Stack{label}/Group{label}")
+                    raise ValueError(f"Mixture 面{num_F}第{item_idx + 1}项缺少箱型 Type")
+                if num <= 0:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Num 必须大于 0，当前为 {num}")
+                if not all(math.isfinite(v) for v in (pos_x, pos_y, pos_z)):
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Pos 含非有限数值")
+                if min(pos_x, pos_y, pos_z) < 0:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Pos 不能为负数")
 
                 params = self._box_params(box_type)
                 box_size = params['size']
-                box_w, box_h = box_size[1], box_size[2]
-                gap = self.W - n_row * box_w
-                if gap < 0:
+                box_l, box_w, box_h = box_size
+                if num > params['grab_p1']:
                     raise ValueError(
-                        f"Mixture {label} 区单层超出车宽：{n_row}×{box_w} > {self.W}")
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Num={num} 超出"
+                        f"箱型 {box_type} 的 P1 单抓能力 {params['grab_p1']}")
+                if pos_y + num * box_w > self.W:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项沿车宽超界："
+                        f"Y({pos_y}) + Num({num})×箱宽({box_w}) > {self.W}")
+                if pos_x + box_l > self.L:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项沿车深超界："
+                        f"X({pos_x}) + 箱长({box_l}) > {self.L}")
+                if pos_z + box_h > self.H:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项沿车高超界："
+                        f"Z({pos_z}) + 箱高({box_h}) > {self.H}")
 
-                for layer in range(n_layers):
-                    pattern_idx = (face_idx + layer) % len(groups)
-                    g = copy.deepcopy(groups[pattern_idx])
-                    s = copy.deepcopy(stacks[(face_idx + layer) % len(stacks)])
-                    if sum(g) != n_row:
-                        raise ValueError(
-                            f"Mixture {label} 区 Group{label}[{pattern_idx}]箱数"
-                            f" {sum(g)} != N{label} {n_row}")
-                    if len(s) < n_row + 1:
-                        raise ValueError(
-                            f"Mixture {label} 区 Stack{label}长度 {len(s)}"
-                            f" 小于 N{label}+1={n_row + 1}")
-                    self._emit_p1_groups(
-                        g, s, gap, z_base + layer * box_h, num_F, n_row,
-                        box_type=box_type, box_size=box_size)
-                z_base += n_layers * box_h
-                if z_base > self.H:
-                    raise ValueError(
-                        f"Mixture 累计高度 {z_base} 超出车厢高度 {self.H}")
+                # 接口与内部坐标一致：X=车深、Y=车宽、Z=车高。
+                internal_pos = [pos_x, pos_y, pos_z]
+                center_y = pos_y + num * box_w * 0.5
+                dir_ = 1 if center_y <= self.W * 0.5 else 2
+                self._emit(
+                    'p1', num, num_F, dir_, internal_pos,
+                    box_type=box_type, box_size=box_size)
 
             if len(self.robot_offsets) == emitted_before:
-                raise ValueError("Mixture 面没有可生成的箱子")
+                raise ValueError(f"Mixture 面{num_F}的 Items 为空")
             self.robot_offsets[-1]['action'] = 1
             self.boxes[-1]['action'] = 1
 

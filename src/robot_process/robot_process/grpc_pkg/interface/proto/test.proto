@@ -34,16 +34,19 @@ message Regular{
 
 // 混装面(面数固定为1，全P1堆放，下方箱体为前垛收尾，上方箱体为后垛开头)
 message Mixture{
-    int32 NA = 1; // 下方箱体每行个数
-    int32 TA = 2; // 下方箱体高度行数
-    repeated Stack StackA = 3; // 下方箱体堆叠缝隙排布
-    repeated Group GroupA = 4; // 下方箱体堆叠按爪分组
-    string TypeA = 5; // 下方箱体箱型代号
-    int32 NB = 6; // 上方箱体每行个数
-    int32 Tb = 7; // 上方箱体高度行数
-    repeated Stack StackB = 8; // 上方箱体堆叠缝隙排布
-    repeated Group GroupB = 9; // 上方箱体堆叠按爪分组
-    string TypeB = 10; // 上方箱体箱型代号
+    repeated MixtureItem Items = 1; // 混装面信息列表
+}
+
+message MixtureItem{
+    string Type = 1; // 箱型代号
+    int32 Num = 2; // 箱子数量
+    Position Pos = 3; // 放置位置
+}
+
+message Position{
+    float X = 1; // 沿车厢深度方向
+    float Y = 2; // 沿车厢宽度方向
+    float Z = 3; // 沿车厢高度方向
 }
 
 // 梯形尾垛(面数固定为1，下方P1堆放，上方P3堆放，如有尾料以P3顶置形式堆放)
