@@ -6,7 +6,7 @@ import copy
 
 
 # 0630 车厢内点云的地面法向 Ry 中位数，作为固定零点。
-# method=4 返回相对该零点的 Ry；method=1/2/3/5 返回 Ry=0。
+# method=4 返回相对该零点的 Ry；method=1/2/3/5/6 返回 Ry=0。
 RY_INTERIOR_BASELINE_DEG = -2.08
 RY_OUTPUT_DEADBAND_DEG = 0.2
 MIN_PLANE_CANDIDATE_POINTS = 30
@@ -30,6 +30,13 @@ SIDE_ANGLE_MAX_Z_M = 1.0
 SIDE_ANGLE_X_BIN_WIDTH_M = 0.05
 SIDE_ANGLE_MIN_BIN_POINTS = 100
 SIDE_ANGLE_MIN_BINS = 10
+MIXTURE_FRONT_DEPTH_BIN_WIDTH_M = 0.005
+MIXTURE_FRONT_LAYER_HALF_BAND_M = 0.010
+MIXTURE_FRONT_MIN_BIN_POINTS = 3
+MIXTURE_FRONT_MIN_LAYER_POINTS = 30
+MIXTURE_FRONT_MIN_WIDTH_M = 0.08
+MIXTURE_FRONT_MIN_HEIGHT_M = 0.08
+MIXTURE_FRONT_MAX_NORMAL_DIFF_DEG = 15.0
 
 
 class CornerDetectionCandidateError(ValueError):
@@ -50,6 +57,141 @@ def require_candidate_values(values, name, min_values=1):
         raise CornerDetectionCandidateError(
             f"{name}有效数据不足: {value_count} < {min_values}")
     return value_count
+
+
+def select_outermost_mixture_front(points, reference_model):
+    """从混装面的多个平行箱面中选择最外侧有效箱面。
+
+    先以整体主平面的拟合法向作为深度轴，再按有符号距离寻找所有
+    绝对点数足够、且具有实际宽高的表面层。候选选择不使用点数占比，
+    最终始终取距离最小（最靠近雷达）的有效层。
+    """
+    candidate_points = np.asarray(points, dtype=float)
+    finite_mask = np.isfinite(candidate_points).all(axis=1)
+    candidate_points = candidate_points[finite_mask]
+    require_candidate_values(
+        candidate_points, "混装面前表面",
+        min_values=MIXTURE_FRONT_MIN_LAYER_POINTS)
+
+    model = np.asarray(reference_model[:4], dtype=float)
+    normal_norm = np.linalg.norm(model[:3])
+    if normal_norm < 1e-9:
+        raise CornerDetectionCandidateError("混装面主平面法向为零")
+    reference_normal = model[:3] / normal_norm
+    reference_offset = float(model[3] / normal_norm)
+    if reference_normal[0] < 0:
+        reference_normal = -reference_normal
+        reference_offset = -reference_offset
+
+    signed_distances = (
+        candidate_points @ reference_normal + reference_offset)
+    distance_min = math.floor(
+        float(signed_distances.min()) /
+        MIXTURE_FRONT_DEPTH_BIN_WIDTH_M
+    ) * MIXTURE_FRONT_DEPTH_BIN_WIDTH_M
+    distance_max = math.ceil(
+        float(signed_distances.max()) /
+        MIXTURE_FRONT_DEPTH_BIN_WIDTH_M
+    ) * MIXTURE_FRONT_DEPTH_BIN_WIDTH_M
+    if distance_max <= distance_min:
+        peak_centers = [float(np.median(signed_distances))]
+    else:
+        edges = np.arange(
+            distance_min,
+            distance_max + MIXTURE_FRONT_DEPTH_BIN_WIDTH_M * 1.5,
+            MIXTURE_FRONT_DEPTH_BIN_WIDTH_M)
+        histogram, edges = np.histogram(signed_distances, bins=edges)
+        peak_indices = []
+        for index, count in enumerate(histogram):
+            if count < MIXTURE_FRONT_MIN_BIN_POINTS:
+                continue
+            left_count = histogram[index - 1] if index > 0 else -1
+            right_count = (
+                histogram[index + 1]
+                if index + 1 < len(histogram) else -1)
+            if count >= left_count and count >= right_count:
+                peak_indices.append(index)
+        peak_centers = [
+            float((edges[index] + edges[index + 1]) * 0.5)
+            for index in peak_indices]
+
+    layer_candidates = []
+    for peak_center in peak_centers:
+        layer_mask = (
+            np.abs(signed_distances - peak_center) <=
+            MIXTURE_FRONT_LAYER_HALF_BAND_M)
+        layer_points = candidate_points[layer_mask]
+        layer_distances = signed_distances[layer_mask]
+        if len(layer_points) < MIXTURE_FRONT_MIN_LAYER_POINTS:
+            continue
+        y_low, y_high = np.percentile(layer_points[:, 1], [5, 95])
+        z_low, z_high = np.percentile(layer_points[:, 2], [5, 95])
+        width = float(y_high - y_low)
+        height = float(z_high - z_low)
+        if (width < MIXTURE_FRONT_MIN_WIDTH_M or
+                height < MIXTURE_FRONT_MIN_HEIGHT_M):
+            continue
+        layer_distance = float(np.median(layer_distances))
+        residuals = layer_distances - layer_distance
+        layer_candidates.append({
+            "distance": layer_distance,
+            "points": layer_points,
+            "count": len(layer_points),
+            "width": width,
+            "height": height,
+            "rms": float(np.sqrt(np.mean(residuals ** 2))),
+        })
+
+    if not layer_candidates:
+        raise CornerDetectionCandidateError(
+            "混装面未找到点数和实际宽高均有效的前表面层")
+
+    # 相邻峰可能来自同一表面的两个直方图箱，先合并为一个候选层。
+    layer_candidates.sort(key=lambda item: item["distance"])
+    merged_candidates = []
+    for candidate in layer_candidates:
+        if (merged_candidates and
+                candidate["distance"] - merged_candidates[-1]["distance"] <=
+                MIXTURE_FRONT_LAYER_HALF_BAND_M):
+            if candidate["count"] > merged_candidates[-1]["count"]:
+                merged_candidates[-1] = candidate
+        else:
+            merged_candidates.append(candidate)
+
+    outermost = min(
+        merged_candidates, key=lambda item: item["distance"])
+    outer_points = np.asarray(outermost["points"], dtype=float)
+    centroid = outer_points.mean(axis=0)
+    _, _, vectors = np.linalg.svd(
+        outer_points - centroid, full_matrices=False)
+    outer_normal = vectors[-1]
+    outer_normal /= np.linalg.norm(outer_normal)
+    if np.dot(outer_normal, reference_normal) < 0:
+        outer_normal = -outer_normal
+    normal_difference = math.degrees(math.acos(np.clip(
+        float(np.dot(outer_normal, reference_normal)), -1.0, 1.0)))
+    if normal_difference > MIXTURE_FRONT_MAX_NORMAL_DIFF_DEG:
+        raise CornerDetectionCandidateError(
+            f"混装面最外层法向偏差过大: {normal_difference:.2f}° > "
+            f"{MIXTURE_FRONT_MAX_NORMAL_DIFF_DEG:.2f}°")
+
+    outer_offset = -float(np.dot(outer_normal, centroid))
+    if outer_normal[0] < 1e-6:
+        raise CornerDetectionCandidateError(
+            "混装面最外层X法向分量过小")
+    # 缩放到 a=1，保持后续侧壁ROI中 -d 表示 y=z=0 处的前表面X。
+    outer_model = np.concatenate((outer_normal, [outer_offset]))
+    outer_model /= outer_model[0]
+    print(
+        f'混装面深度分层: 有效层={len(merged_candidates)}, '
+        f'选择最外层距离={outermost["distance"] * 1000:.1f}mm, '
+        f'点数={outermost["count"]}, '
+        f'范围Y={outermost["width"]:.3f}m, '
+        f'范围Z={outermost["height"]:.3f}m, '
+        f'RMS={outermost["rms"] * 1000:.2f}mm, '
+        f'法向偏差={normal_difference:.2f}°'
+    )
+    return outer_model.tolist(), outer_points, merged_candidates
 
 
 def slice_ground_height_layer(points, name="地面高度切片"):
@@ -668,6 +810,7 @@ def _process_point_cloud_impl(pcd, method):
     # 1: 车头波纹板；2: I垛面；3: L垛面；
     # 4: I垛面角点，并返回相对车厢内基准的 Ry；
     # 5: 异形车头，返回正面与左右斜面交线在地面上的两个点。
+    # 6: 前一面为混装面，按法向深度分层并使用最外侧有效箱面。
     print(f'method: {method}')
     _FRONT_RIB_MIN = 0.05            # 车头加强筋兜底补偿(m)：筋检测不足时至少前移此距离
     _FRONT_RIB_MAX = 0.10            # 车头加强筋补偿上限(m)：检测过深时最多前移此距离
@@ -677,10 +820,16 @@ def _process_point_cloud_impl(pcd, method):
     _SIDE_LAYER_GAP = 0.05           # 平行表面的 y 向分层间隔(m)，用于剔除垛面侧面
     down_pcd = pcd
     if view:
-        down_pcd = fiterCloud(down_pcd)
+        # method=6 的算法候选保留原始点云，避免小面积外凸箱面因占比低
+        # 被统计离群过滤提前删除；Down窗口仍显示过滤后的副本。
+        if method == 6:
+            display_source_pcd = fiterCloud(copy.deepcopy(down_pcd))
+        else:
+            down_pcd = fiterCloud(down_pcd)
+            display_source_pcd = down_pcd
         # 仅在Down窗口排除会破坏相机包围盒的异常超大坐标，
         # 后续角点算法仍使用原始 down_pcd。
-        display_points = np.asarray(down_pcd.points)
+        display_points = np.asarray(display_source_pcd.points)
         display_mask = (
             np.isfinite(display_points).all(axis=1) &
             (np.abs(display_points) < 100.0).all(axis=1))
@@ -708,13 +857,14 @@ def _process_point_cloud_impl(pcd, method):
     filtered_points = points[x_filtered & y_filtered & z_filtered]
     filtered_pcd = o3d.geometry.PointCloud()
     filtered_pcd.points = o3d.utility.Vector3dVector(filtered_points)
-    filtered_pcd = fiterCloud(filtered_pcd)
+    if method != 6:
+        filtered_pcd = fiterCloud(filtered_pcd)
     require_candidate_points(filtered_pcd, "ROI滤波", min_points=50)
     filtered_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=50))
     normals = np.asarray(filtered_pcd.normals)
     points = np.asarray(filtered_pcd.points)
 
-    if method in (1, 2, 4, 5):
+    if method in (1, 2, 4, 5, 6):
         flip_mask = normals[:, 0] < 0
         normals[flip_mask] *= -1
         filtered_pcd.normals = o3d.utility.Vector3dVector(normals)
@@ -728,7 +878,8 @@ def _process_point_cloud_impl(pcd, method):
         front_points = np.asarray(filtered_pcd.points)[front_indices]
         front_pcd = o3d.geometry.PointCloud()
         front_pcd.points = o3d.utility.Vector3dVector(front_points)
-        front_pcd = fiterCloud(front_pcd)
+        if method != 6:
+            front_pcd = fiterCloud(front_pcd)
         if view:
             front_pcd.paint_uniform_color([0, 1, 1])
             pcd_show = copy.deepcopy(filtered_pcd)
@@ -752,6 +903,7 @@ def _process_point_cloud_impl(pcd, method):
         if a < 0:
             a, b, c, d = -a, -b, -c, -d
         rib_points = np.empty((0, 3))
+        mixture_outer_points = np.empty((0, 3))
         if method == 1:
             # 车头加强筋：用法向滤波后(未经统计滤波删除)的全部前面点，
             # 取最凸向货舱的 _RIB_PCT% 分位均值作筋深，再夹在 [_FRONT_RIB_MIN, _FRONT_RIB_MAX]
@@ -764,6 +916,10 @@ def _process_point_cloud_impl(pcd, method):
             i_model = [a, b, c, d - delta_eff]
             print(f'车头筋补偿：检测 delta={delta*1000:.1f}mm, 实际采用={-delta_eff*1000:.1f}mm, '
                   f'筋点数={len(rib_points)}')
+        elif method == 6:
+            i_model, mixture_outer_points, _ = (
+                select_outermost_mixture_front(
+                    np.asarray(front_pcd.points), [a, b, c, d]))
         else:
             i_model = [a, b, c, d]
         if method == 5:
@@ -783,6 +939,12 @@ def _process_point_cloud_impl(pcd, method):
             vis.create_window(window_name="Front result", width=800, height=600, left=500, top=200)
             vis.add_geometry(filtered_pcd)
             vis.add_geometry(front_plane2)
+            if method == 6:
+                mixture_outer_pcd = o3d.geometry.PointCloud()
+                mixture_outer_pcd.points = o3d.utility.Vector3dVector(
+                    mixture_outer_points)
+                mixture_outer_pcd.paint_uniform_color([1, 0, 1])
+                vis.add_geometry(mixture_outer_pcd)
             if method == 5:
                 left_show = copy.deepcopy(special_left_cloud)
                 right_show = copy.deepcopy(special_right_cloud)
@@ -858,7 +1020,7 @@ def _process_point_cloud_impl(pcd, method):
             vis.destroy_window()
     else:
         raise Exception(
-            f'Wrong method value: {method}; expected 1, 2, 3, 4, or 5')
+            f'Wrong method value: {method}; expected 1, 2, 3, 4, 5, or 6')
 
     # 左侧面点云滤波
     flip_mask = (normals[:, 1] * points[:, 1]) < 0
@@ -1217,7 +1379,8 @@ def _process_point_cloud_impl(pcd, method):
 
     # 角点 XYZ 由三平面求交：垛面使用实测拟合法向，
     # 左右侧面和底面仍使用固定法向。method=5的两个角点分别由
-    # 中间正面、对应斜面和地面求交；实测地面法向仅供method=4计算Ry。
+    # 中间正面、对应斜面和地面求交；method=6的前面使用混装面中
+    # 最外侧有效箱面的拟合平面；实测地面法向仅供method=4计算Ry。
     ground_position_model = fixed_axis_plane(ground_model, axis=2, sign=-1)
     front_position_model = list(i_model[:4])
     side_left_position_model = fixed_axis_plane(side_left_model, axis=1, sign=1)
@@ -1225,7 +1388,7 @@ def _process_point_cloud_impl(pcd, method):
     front_right_position_model = (
         list(l_model[:4]) if method == 3 else None)
 
-    if method in (1, 2, 4, 5):
+    if method in (1, 2, 4, 5, 6):
         if method == 5:
             corner_point1 = intersection_of_planes(
                 front_position_model,
@@ -1310,6 +1473,8 @@ def _process_point_cloud_impl(pcd, method):
             vis.create_window(window_name="Two corner result", width=800, height=600, left=500, top=200)
             vis.add_geometry(filtered_pcd)
             vis.add_geometry(front_plane2)
+            if method == 6:
+                vis.add_geometry(mixture_outer_pcd)
             if method == 5:
                 vis.add_geometry(special_left_plane)
                 vis.add_geometry(special_right_plane)
