@@ -66,11 +66,14 @@ def parse_path_block(block):
 
 def handle_get_pallet(sock):
     sock.sendall(CMD_GET_PALLET)
-    _, blocks = recv_response(sock)
+    n, blocks = recv_response(sock)
     f0 = parse_floats(blocks[0], 3)
     f1 = parse_floats(blocks[1], 3)
     print(f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  车宽={f0[2]:.0f}mm")
     print(f"  箱尺寸 L={f1[0]:.0f} W={f1[1]:.0f} H={f1[2]:.0f}")
+    if n >= 3:
+        mixture_pos = parse_floats(blocks[2], 1)[0]
+        print(f"  混装 block 位置={int(mixture_pos)}")
 
 
 def handle_get_per_count(sock):
@@ -82,9 +85,12 @@ def handle_get_per_count(sock):
 
 def handle_get_box(sock):
     sock.sendall(CMD_GET_BOX)
-    _, blocks = recv_response(sock)
-    f = parse_floats(blocks[0], 2)
-    print(f"  配方号={int(f[0])}  箱型={int(f[1])}")
+    n, blocks = recv_response(sock)
+    f = parse_floats(blocks[0], 3)
+    print(f"  配方号={int(f[0])}  箱型={int(f[1])}  区域={int(f[2])}")
+    if n >= 2:
+        size = parse_floats(blocks[1], 3)
+        print(f"  箱尺寸 L={size[0]:.0f} W={size[1]:.0f} H={size[2]:.0f}mm")
 
 
 def handle_get_path(sock):

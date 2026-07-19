@@ -13,7 +13,6 @@
 | `pointcloud_process` | 独立的点云角点及垛面检测工具 | `stacking_detection_node` |
 | `cabin_width_check` | 多站点云拼接、车厢宽度切片测量、超限判断及 RViz 显示 | `width_check_node` |
 | `robot_process` | 垛型接收、垛序解析、角点/垛面检测、路径规划、断点续传及机器人 TCP 通信 | `robot_process_node` |
-| `web_scraper` | 独立的数据抓取与报表分析工具，不参与机器人运行主链路 | 多个 Eastmoney 节点 |
 
 ## 目录说明
 
@@ -129,14 +128,10 @@ ros2 run hesai_ros_driver hesai_ros_driver_node
 
 ## 当前混装面接口
 
-混装面只使用最新的 `Mixture.Items` 格式，不再兼容旧 A/B 字段：
+混装面使用扁平的 `Mixture` 列表，不再额外嵌套 `Items`：
 
 ```proto
 message Mixture {
-    repeated MixtureItem Items = 1;
-}
-
-message MixtureItem {
     string Type = 1;
     int32 Num = 2;
     Position Pos = 3;
@@ -153,18 +148,43 @@ message Position {
 
 ```json
 "mixture": [
-  {
-    "Items": [
-      {"Type": "104", "Num": 4, "Pos": {"X": 20, "Y": 0, "Z": 0}},
-      {"Type": "201", "Num": 4, "Pos": {"X": 30, "Y": 1360, "Z": 580}}
-    ]
-  }
+  {"Type": "104", "Num": 4, "Pos": {"X": 20, "Y": 0, "Z": 0}},
+  {"Type": "201", "Num": 4, "Pos": {"X": 30, "Y": 1360, "Z": 580}}
 ]
 ```
 
-每个 `Mixture` 表示一个混装面，`Items` 的顺序就是放置动作顺序。`Type` 必须能在订单箱型信息中找到；`Num` 必须大于零且不能超过对应箱型的 P1 单抓能力；坐标单位为毫米，并且必须位于车厢范围内。
+同一个 `Block` 内的全部 `Mixture` 条目组成一个混装面，列表顺序就是放置动作顺序。每条数据会生成对应的 `rp.boxes` 来料记录和 `rp.robot_offsets` 放置动作，并携带当前箱型及其有效尺寸。
+
+`Type` 必须能在订单箱型信息中找到；`Num` 必须大于零且不能超过对应箱型的 P1 单抓能力；坐标单位为毫米，并且必须位于车厢范围内。混装面的 `area_cfg` 全部固定为 `1`；`dir` 根据整抓箱组的中心 Y 坐标判断，中心位于车厢左半边时为 `1`，位于右半边时为 `2`。
 
 正式接口文件位于 `src/robot_process/robot_process/grpc_pkg/interface/proto/`。修改 proto 后，需要重新生成 Python 接口文件并重新构建功能包。
+
+## 机器人 TCP 关键接口
+
+机器人响应中的每个数据块为 41 字节，浮点数据按照大端 `float32` 编码。
+
+### `cmd_get_pallet`
+
+当前返回 3 个数据块：
+
+| 数据块 | 内容 |
+| --- | --- |
+| 1 | 当前 block 总箱数、码垛面数、车厢宽度 |
+| 2 | 当前 block 默认箱型的有效尺寸 `L/W/H` |
+| 3 | 混装 block 在完整 `rp_list` 中的位置 |
+
+混装 block 位置从 `1` 开始编号：不存在混装 block 时为 `0`，`rp_list[0]` 是混装 block 时为 `1`，`rp_list[1]` 是混装 block 时为 `2`。如果存在多个混装 block，发送第一个的位置。
+
+### `cmd_get_box`
+
+当前返回 2 个数据块：
+
+| 数据块 | 内容 |
+| --- | --- |
+| 1 | 来料配方号 `box_cfg`、箱型 `box_type`、位置编号 `area_cfg` |
+| 2 | 当前这一抓箱子的有效尺寸 `L/W/H` |
+
+有效尺寸为原始箱体尺寸加配置中的预留量。混装面可以在不同抓之间切换箱型，尺寸取自当前弹出的 `rp.boxes` 记录，不使用当前 block 的固定默认尺寸。
 
 ## 车厢宽度检测
 
@@ -201,4 +221,3 @@ python3 -m unittest -v src/robot_process/test/test_mixture.py
 - 在线模式一直等待：依次检查规划器是否连接 gRPC `5007`、机器人是否连接 TCP `8001`，以及防火墙和 IP 配置。
 - 点云没有数据：检查雷达网络参数、实际发布话题以及节点订阅的 `/lidar_points1`、`/lidar_points2` 是否一致。
 - 修改 proto 后字段未生效：重新生成 `*_pb2.py`，再重新构建并加载工作区。
-

@@ -77,6 +77,15 @@ def _data_block(*floats) -> bytes:
     )
 
 
+def _find_mixture_block_position(rp_list) -> int:
+    """返回首个混装 block 在 rp_list 中从 1 开始的位置；不存在时返回 0。"""
+    return next(
+        (index for index, item in enumerate(rp_list, start=1)
+         if item.block_type == 'mixture'),
+        0,
+    )
+
+
 def _parse_stack_group(src, stack_attr='Stack', group_attr='Group'):
     """将 protobuf Stack/Group 转为二维列表"""
     return {
@@ -120,15 +129,22 @@ def _parse_trapezoid(src_list):
 
 
 def _proto_mixture_items(face):
-    """返回 protobuf 混装面的 Items 列表。"""
-    return getattr(face, 'Items', ())
+    """返回 protobuf 混装条目；兼容旧版 Items 嵌套结构。"""
+    items = getattr(face, 'Items', None)
+    if items is not None:
+        return items
+    if all(hasattr(face, name) for name in ('Type', 'Num', 'Pos')):
+        return (face,)
+    return None
 
 
 def _parse_mixture(src_list):
-    """解析 Mixture.Items/Pos 列表。"""
-    result = []
-    for face in src_list:
-        items = _proto_mixture_items(face)
+    """将新版扁平 Mixture 列表归一成内部单面 Items 结构。"""
+    flat_items = []
+    legacy_faces = []
+    for entry in src_list:
+        nested_items = getattr(entry, 'Items', None)
+        items = nested_items if nested_items is not None else (entry,)
         parsed_items = []
         for item in items:
             parsed_items.append({
@@ -136,15 +152,24 @@ def _parse_mixture(src_list):
                 'Num': item.Num,
                 'Pos': {'X': item.Pos.X, 'Y': item.Pos.Y, 'Z': item.Pos.Z},
             })
-        result.append({'Items': parsed_items})
-    return result
+        if nested_items is None:
+            flat_items.extend(parsed_items)
+        else:
+            legacy_faces.append({'Items': parsed_items})
+
+    # 新版协议中 Block.mixture 的全部条目共同组成唯一一个混装面。
+    if flat_items:
+        return [{'Items': flat_items}, *legacy_faces]
+    return legacy_faces
 
 
 def _json_mixture_items(face):
-    """返回 JSON 混装面的 Items 列表。"""
+    """返回 JSON 混装条目；兼容旧版 Items 嵌套结构。"""
     for key in ('Items', 'items'):
         if key in face:
             return face[key]
+    if any(key in face for key in ('Type', 'type')):
+        return (face,)
     return None
 
 
@@ -154,12 +179,16 @@ def _json_value(data, upper_name, default=None):
 
 
 def _parse_mixture_json(src_list):
-    """将规划器 JSON 的 Mixture.Items/Pos 转为内部字典。"""
-    result = []
-    for face in src_list:
-        items = _json_mixture_items(face)
-        if items is None:
-            raise ValueError("Mixture 缺少 Items 字段")
+    """将新版扁平 Mixture 列表归一成内部单面 Items 结构。"""
+    flat_items = []
+    legacy_faces = []
+    for entry in src_list:
+        nested_items = None
+        for key in ('Items', 'items'):
+            if key in entry:
+                nested_items = entry[key]
+                break
+        items = nested_items if nested_items is not None else (entry,)
         parsed_items = []
         for item in items:
             pos = _json_value(item, 'Pos', {}) or {}
@@ -172,8 +201,14 @@ def _parse_mixture_json(src_list):
                     'Z': _json_value(pos, 'Z', 0.0),
                 },
             })
-        result.append({'Items': parsed_items})
-    return result
+        if nested_items is None:
+            flat_items.extend(parsed_items)
+        else:
+            legacy_faces.append({'Items': parsed_items})
+
+    if flat_items:
+        return [{'Items': flat_items}, *legacy_faces]
+    return legacy_faces
 
 
 
@@ -465,11 +500,14 @@ def main():
         try:
             rp_list = [RobotPosition(block_cfg)
                        for block_cfg in (config_rp if isinstance(config_rp, list) else [config_rp])]
+            mixture_block_position = _find_mixture_block_position(rp_list)
             # 最后一个 block 的末条目 action 升为 3（全部结束），其余 block 末条目保持 2（block 结束）
             rp_list[-1].boxes[-1]['action'] = 3
             last_offset = next(x for x in reversed(rp_list[-1].robot_offsets) if x != 'done')
             last_offset['action'] = 3
-            logs.info("计算垛序成功！共 {} 个 block".format(len(rp_list)))
+            logs.info(
+                f"计算垛序成功！共 {len(rp_list)} 个 block，"
+                f"混装 block 位置={mixture_block_position}")
         except Exception as e:
             logs.error(f"垛序计算失败，请检查垛型数据: {e}")
             sys.exit(1)
@@ -529,15 +567,20 @@ def main():
             else:
                 mes_hex = cmd_get_path
             if mes_hex == cmd_get_pallet:
-                # 发送总体信息（2块：垛型参数 + 箱型参数）
+                # 发送总体信息（3块：垛型参数 + 箱型参数 + 混装 block 位置）
                 payload = (
                     _data_block(rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W)
                     + _data_block(rp.l, rp.w, rp.h)
+                    + _data_block(float(mixture_block_position))
                     + b'\x00\x00'
                 )
-                server.send_message(_build_msg(2, payload))
+                server.send_message(_build_msg(3, payload))
                 floor_n = rp.ori_offsets[-2]['num_F']
-                logs.debug(f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, 车厢宽度：{round(rp.W, 2)}, 箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}')
+                logs.debug(
+                    f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, '
+                    f'车厢宽度：{round(rp.W, 2)}, '
+                    f'箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}, '
+                    f'混装 block 位置：{mixture_block_position}')
             elif mes_hex == cmd_get_per_count:
                 # 发送单面信息
                 pallet_cnt = rp.cal_floor_count()
@@ -559,7 +602,7 @@ def main():
                 ) + b'\x00\x00'))
                 logs.debug(f'单面码垛放置次数：{pallet_cnt}，每行抓数={_n_per_row}')
             elif mes_hex == cmd_get_box:
-                # 单次来料箱子样式
+                # 单次来料箱子样式（2块：来料配方 + 当前箱型尺寸）
                 # box['action'] 语义：
                 #   0 → 普通，继续
                 #   1 → 当前码垛面最后一箱，机器人换面
@@ -572,14 +615,20 @@ def main():
                 box_cfg = box['num']
                 area_cfg = box.get('area_cfg', 1)
                 box_type_cfg = box.get('box_type', rp.box_type)
+                box_size_cfg = box.get('size', [rp.l, rp.w, rp.h])
                 # 断点续传：先存游标后发送（断电宁可漏一抓也不重码）
                 cur_box_id = box['id']
                 if store and not off_line_mode and resume_save:
                     store.save_cursor(rp_idx, cur_box_id, cur_path_id)
-                server.send_message(_build_msg(1, _data_block(
-                    float(box_cfg), float(int(box_type_cfg)), float(area_cfg)
-                ) + b'\x00\x00'))
-                logs.debug(f'来料箱子配方号：{box_cfg}，位置编号：{area_cfg}，动作标志：{box["action"]}')
+                payload = (
+                    _data_block(float(box_cfg), float(int(box_type_cfg)), float(area_cfg))
+                    + _data_block(*map(float, box_size_cfg))
+                    + b'\x00\x00'
+                )
+                server.send_message(_build_msg(2, payload))
+                logs.debug(
+                    f'来料箱子配方号：{box_cfg}，位置编号：{area_cfg}，'
+                    f'尺寸L/W/H：{box_size_cfg}，动作标志：{box["action"]}')
             elif mes_hex == cmd_get_path:
             # 单次路径点
                 if not rp.robot_offsets:

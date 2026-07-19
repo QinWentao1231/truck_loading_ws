@@ -147,7 +147,7 @@ class RobotPosition:
               box_type=None, box_size=None):
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
-        boxes 中 num 存整数，并附加箱型信号（+10）：
+        boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；箱型信号（+10）：
           - 20x 箱型：任意区域 +10
           - 10x / 30x 箱型：仅 P3 区域 +10
         """
@@ -168,7 +168,7 @@ class RobotPosition:
         self.boxes.append({
             'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F,
             'action': 0, 'area_cfg': 0, 'is_tail': is_tail,
-            'box_type': action_box_type,
+            'box_type': action_box_type, 'size': action_box_size,
         })
 
     @staticmethod
@@ -550,7 +550,7 @@ class RobotPosition:
                 else:
                     id_to_cfg[oid] = 2
         for box in self.boxes:
-            if box.get('is_tail') or box['area'] == 'p3':
+            if self.block_type == 'mixture' or box.get('is_tail') or box['area'] == 'p3':
                 box['area_cfg'] = 1
             else:
                 box['area_cfg'] = id_to_cfg.get(box['id'], 1)

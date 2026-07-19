@@ -63,12 +63,23 @@ class MixturePlacementTest(unittest.TestCase):
         self.assertTrue(all(a['area'] == 'p1' for a in actions))
         self.assertEqual([b['box_type'] for b in rp.boxes], ['104', '201'])
         self.assertEqual([b['num'] for b in rp.boxes], [4, 14])
+        self.assertEqual(
+            [b['size'] for b in rp.boxes],
+            [[460, 250, 580], [525, 275, 300]],
+        )
 
     def test_position_item_rejects_num_above_grip_capacity(self):
         cfg = make_mixture_config()
         cfg['mixture'][0]['Items'][0]['Num'] = 5
         with self.assertRaisesRegex(ValueError, 'P1 单抓能力'):
             RobotPosition(cfg)
+
+    def test_all_mixture_area_cfg_are_fixed_to_one(self):
+        cfg = make_mixture_config()
+        # 两抓放在同一层时，通用左右排序原本会得到 1/3；混装面必须全部固定为 1。
+        cfg['mixture'][0]['Items'][1]['Pos']['Z'] = 0
+        rp = RobotPosition(cfg)
+        self.assertEqual([box['area_cfg'] for box in rp.boxes], [1, 1])
 
     def test_empty_items_are_rejected(self):
         cfg = make_mixture_config()
