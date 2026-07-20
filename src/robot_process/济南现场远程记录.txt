@@ -26,6 +26,7 @@
 7.19 混行需求
 1. TASK0001增加更新箱型尺寸；
 2. ISGHT-BOXR去掉更新箱型；
-3. SYSINIT增加R[127]=0;
-4. TASK0001R127自增以及GO1的条件触发;
-5. 
+3. ISIGHT_CFGR增加R[126]混装面索引获取；
+4. SYSINIT增加R[127]=0;
+5. TASK0001R127自增;
+6. AGV_RETREAT增加GO1判断。
