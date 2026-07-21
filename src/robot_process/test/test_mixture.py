@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'robot_process'))
 
-from rrt_env.environment_3D import RobotPosition
+from rrt_env.environment_3D import BinEnv, RobotPosition
 
 
 def make_mixture_config():
@@ -44,6 +44,60 @@ def make_mixture_config():
             ],
         }],
     }
+
+
+def make_complex_mixture_config():
+    """现场混装测试面；105 高度按 580 mm。"""
+    positions = [
+        ('105', 2, 0, 0),
+        ('105', 3, 515, 0),
+        ('105', 4, 1280, 0),
+        ('105', 4, 0, 580),
+        ('203', 4, 1177, 580),
+        ('203', 4, 1177, 873),
+        ('203', 4, 0, 1160),
+        ('203', 4, 1177, 1166),
+        ('203', 4, 0, 1453),
+        ('203', 4, 1177, 1465),
+    ]
+    return {
+        'box_list': ['105', '203'],
+        'box': {
+            '105': {
+                'size': {'L': 455, 'W': 245, 'H': 580},
+                'reserve': {},
+                'grip': {'P1': [4], 'P2': [3], 'P3': [2]},
+            },
+            '203': {
+                'size': {'L': 520, 'W': 285, 'H': 285},
+                'reserve': {},
+                'grip': {'P1': [4], 'P2': [3], 'P3': [2]},
+            },
+        },
+        'car': {
+            'size': {'L': 6100, 'W': 2900, 'H': 2900},
+            'reserve': {'L': 50, 'W': 80, 'H': 165},
+        },
+        'regular': [],
+        'trapezoid': [],
+        'mixture': [{
+            'Items': [
+                {
+                    'Type': box_type,
+                    'Num': num,
+                    'Pos': {'X': 0, 'Y': y, 'Z': z},
+                }
+                for box_type, num, y, z in positions
+            ],
+        }],
+    }
+
+
+def make_bin_env():
+    return BinEnv({
+        'reserve_grip': [0, 0, 50],
+        'reserve_object': [49, 49, 49],
+    })
 
 
 class MixturePlacementTest(unittest.TestCase):
@@ -86,6 +140,60 @@ class MixturePlacementTest(unittest.TestCase):
         cfg['mixture'][0]['Items'] = []
         with self.assertRaisesRegex(ValueError, 'Items 为空'):
             RobotPosition(cfg)
+
+    def test_sixth_grab_detects_fourth_grab_by_z_volume_overlap(self):
+        rp = RobotPosition(make_complex_mixture_config())
+        actions = [a for a in rp.ori_offsets if a != 'done']
+        env = make_bin_env()
+        for action in actions[:5]:
+            env.step(action)
+
+        clearance = env.mixture_side_clearance(
+            actions[5], left_wall=0, right_wall=rp.W,
+            min_z_overlap=20)
+
+        self.assertEqual(clearance['relevant_count'], 4)
+        self.assertAlmostEqual(clearance['left_edge'], 980)
+        self.assertAlmostEqual(clearance['left_gap'], 197)
+        self.assertAlmostEqual(clearance['right_gap'], 583)
+        self.assertFalse(clearance['blocking'])
+        self.assertEqual(1 if clearance['left_gap'] <= clearance['right_gap'] else 2, 1)
+
+    def test_eighth_grab_right_app_avoids_left_stack(self):
+        rp = RobotPosition(make_complex_mixture_config())
+        actions = [a for a in rp.ori_offsets if a != 'done']
+        env = make_bin_env()
+        for action in actions[:7]:
+            env.step(action)
+
+        action = actions[7]
+        clearance = env.mixture_side_clearance(
+            action, left_wall=0, right_wall=rp.W,
+            min_z_overlap=20)
+        self.assertAlmostEqual(clearance['left_gap'], 37)
+        self.assertAlmostEqual(clearance['right_gap'], 583)
+
+        size = (520, 1140, 335)
+        unsafe_path = [
+            (650, 1077, 1715),
+            (650, 1077, 1715),
+            (50, 1077, 1216),
+            (0, 1177, 1166),
+        ]
+        safe_path = [
+            (650, 1277, 1715),
+            (650, 1277, 1715),
+            (50, 1277, 1216),
+            (0, 1177, 1166),
+        ]
+        unsafe, detail = env.trajectory_collision_free(
+            unsafe_path, size, sample_step=10)
+        safe, _ = env.trajectory_collision_free(
+            safe_path, size, sample_step=10)
+
+        self.assertFalse(unsafe)
+        self.assertIsNotNone(detail)
+        self.assertTrue(safe)
 
 
 if __name__ == '__main__':

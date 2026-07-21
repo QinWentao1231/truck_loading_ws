@@ -591,12 +591,115 @@ class BinEnv:
     def __init__(self, config_data):
         self.reserve_grip = config_data['reserve_grip']
         self.reserve_object = config_data['reserve_object']
+        self.mixture_z_overlap_min = float(
+            config_data.get('mixture_z_overlap_min', 20.0))
         self.objects = []          # 含 reserve_object 外扩的包围盒，用于碰撞检测
         self.display_objects = []  # 真实尺寸的箱体，用于可视化
 
     def reset(self):
         self.objects = []
         self.display_objects = []
+
+    @staticmethod
+    def _aabb_intersects(a, b, tol=0.5):
+        """判断两个三维 AABB 是否存在实质重叠，边界接触不算碰撞。"""
+        return all(a[i] < b[i + 3] - tol and a[i + 3] > b[i] + tol
+                   for i in range(3))
+
+    def mixture_side_clearance(self, action, left_wall, right_wall,
+                               min_z_overlap=None):
+        """按真实已码箱体计算混装抓取目标左右两侧的可用空间。
+
+        与规则垛的“底部 Z 完全相等”不同，这里使用 X/Z 包围盒的有效重叠
+        判断某个已码箱体是否会影响当前抓的横向进入。返回的 blocking 表示
+        目标位置本身已经与已有箱体重叠，由调用方决定回退或报警。
+        """
+        if action['area'] != 'p1':
+            raise ValueError("混装动态 APP 当前仅支持 P1 区域")
+        if min_z_overlap is None:
+            min_z_overlap = self.mixture_z_overlap_min
+
+        current_boxes = self.to_box(action)
+        if not current_boxes:
+            raise ValueError("当前混装动作没有可用箱体")
+
+        cur_x0 = min(box.position[0] for box in current_boxes)
+        cur_y0 = min(box.position[1] for box in current_boxes)
+        cur_z0 = min(box.position[2] for box in current_boxes)
+        cur_x1 = max(box.position[0] + box.length for box in current_boxes)
+        cur_y1 = max(box.position[1] + box.width for box in current_boxes)
+        cur_z1 = max(box.position[2] + box.height for box in current_boxes)
+
+        left_edges = []
+        right_starts = []
+        blocking = []
+        relevant = []
+        for obstacle in self.display_objects:
+            obs_x0, obs_y0, obs_z0, obs_x1, obs_y1, obs_z1 = obstacle
+            x_overlap = min(cur_x1, obs_x1) - max(cur_x0, obs_x0)
+            z_overlap = min(cur_z1, obs_z1) - max(cur_z0, obs_z0)
+            if x_overlap <= 0 or z_overlap < min_z_overlap:
+                continue
+
+            relevant.append(obstacle)
+            if obs_y1 <= cur_y0:
+                left_edges.append(obs_y1)
+            elif obs_y0 >= cur_y1:
+                right_starts.append(obs_y0)
+            else:
+                blocking.append(obstacle)
+
+        left_edge = max(left_edges) if left_edges else float(left_wall)
+        right_start = min(right_starts) if right_starts else float(right_wall)
+        return {
+            'current_aabb': (cur_x0, cur_y0, cur_z0, cur_x1, cur_y1, cur_z1),
+            'left_edge': left_edge,
+            'right_start': right_start,
+            'left_gap': cur_y0 - left_edge,
+            'right_gap': right_start - cur_y1,
+            'left_is_box': bool(left_edges),
+            'right_is_box': bool(right_starts),
+            'blocking': blocking,
+            'relevant_count': len(relevant),
+        }
+
+    def trajectory_collision_free(self, path, size, sample_step=10.0):
+        """连续采样检查整抓包围盒沿路径是否碰撞。
+
+        x0→x1、x1→APP 使用带 reserve_object 的安全障碍物；APP→goal
+        使用真实箱体，允许最终正常贴箱和落在支撑面上。返回 (是否安全, 详情)。
+        """
+        if len(path) < 2:
+            return True, None
+        if sample_step <= 0:
+            raise ValueError("轨迹采样步长必须大于 0")
+
+        for seg_idx, (start, end) in enumerate(zip(path, path[1:])):
+            # 最后一段是精确落箱过程，不能使用外扩障碍，否则正常贴箱也会误报。
+            obstacles = (self.display_objects
+                         if seg_idx == len(path) - 2 else self.objects)
+            distance = math.sqrt(sum((end[i] - start[i]) ** 2 for i in range(3)))
+            sample_count = max(1, int(math.ceil(distance / sample_step)))
+            for sample_idx in range(sample_count + 1):
+                ratio = sample_idx / sample_count
+                point = tuple(start[i] + (end[i] - start[i]) * ratio
+                              for i in range(3))
+                carried = (
+                    point[0], point[1], point[2],
+                    point[0] + size[0],
+                    point[1] + size[1],
+                    point[2] + size[2],
+                )
+                for obs_idx, obstacle in enumerate(obstacles):
+                    if self._aabb_intersects(carried, obstacle):
+                        return False, {
+                            'segment': seg_idx,
+                            'sample': sample_idx,
+                            'ratio': ratio,
+                            'point': point,
+                            'obstacle_index': obs_idx,
+                        }
+        return True, None
 
     @staticmethod
     def to_box(action):

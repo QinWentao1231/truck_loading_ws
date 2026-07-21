@@ -15,7 +15,9 @@ from socket_pkg.socket_server import SocketApp
 from socket_pkg import socket_client
 from stacking_detection.stacking_detection_node import collect_dual_lidar_once, check_stacking, save_point_clouds
 from grpc_pkg.grpc_server import GrpcServer
-from auxiliary_methods.plotting import Plot
+from auxiliary_methods.plotting import (
+    Plot, resolve_output_dir, save_face_layout,
+)
 from auxiliary_methods.logging import Logger
 from auxiliary_methods.resume_store import ResumeStore, resolve_resume_dir
 
@@ -84,6 +86,165 @@ def _find_mixture_block_position(rp_list) -> int:
          if item.block_type == 'mixture'),
         0,
     )
+
+
+def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
+                          y_offset_app, direction=None):
+    """按现有规则生成 P1/P3 的 x0、x1、APP 和碰撞包围盒。"""
+    direction = action['dir'] if direction is None else direction
+    app_offset = config_be['p1_app_offset_list'][0]
+    x_app = (
+        action['pos'][0] + app_offset[0],
+        action['pos'][1] + y_offset_app,
+        action['pos'][2] + app_offset[2],
+    )
+
+    # P3 侧立时箱子 z 跨度为原始宽 w；P1 竖放时为原始高 h。
+    box_z = action['size'][1] if action['area'] == 'p3' else action['size'][2]
+    if action['pos'][2] + box_z < config_be['p3_init_pos'][2]:
+        x0 = [
+            config_be['p1_init_pos'][0],
+            config_be['p1_init_pos'][1],
+            max(config_be['p1_init_pos'][2] - box_z, x_app[2]),
+        ]
+    elif action['area'] == 'p1':
+        action_grab_p1 = action.get('grab_num_p1', rp.grab_num_p1)
+        action_box_w = action['size'][1]
+        x0 = [
+            config_be['p1_init_pos'][0],
+            max(rp.W - (action_grab_p1 + 1) * action_box_w, x_app[1]),
+            max(config_be['p3_init_pos'][2] - box_z, x_app[2]),
+        ]
+    else:
+        x0 = [
+            config_be['p3_init_pos'][0],
+            config_be['p3_init_pos'][1],
+            max(config_be['p3_init_pos'][2] - box_z, x_app[2]),
+        ]
+
+    if action['pos'][2] < box_z:
+        x0[0] = 200
+
+    if action['pos'][2] + box_z < config_be['p3_init_pos'][2]:
+        if direction == 1:
+            x1_y = (x_app[1] + action['size'][1] / 2
+                    if action['pos'][1] < action['size'][1]
+                    and action['pos'][2] <= 2 * box_z
+                    else x_app[1])
+        else:
+            x1_y = x_app[1]
+        x1 = [x0[0], x1_y, x0[2]]
+    else:
+        x1 = [
+            100 if action['area'] == 'p1' else x0[0],
+            x0[1] if action['area'] == 'p1' else x_app[1],
+            x0[2],
+        ]
+
+    actual_num = sum(action['num'])
+    if action['area'] == 'p1':
+        size = (
+            action['size'][0],
+            action['size'][1] * actual_num,
+            action['size'][2] + reserve_grip[2],
+        )
+    else:
+        size = (
+            action['size'][0],
+            action['size'][2] * actual_num,
+            action['size'][1] + reserve_grip[2],
+        )
+    return x0, x1, x_app, size
+
+
+def _candidate_goal(action, rp, config_be, dis_y, direction):
+    """计算候选轨迹使用的目标点，不产生重复日志。"""
+    if config_be['use_corner'] and direction == 2:
+        correction = float(np.clip(dis_y - rp.W, 0, 40))
+        return (action['pos'][0], action['pos'][1] + correction, action['pos'][2])
+    return tuple(action['pos'])
+
+
+def _save_face_visualizations(rp, block_number, face_number, stamp,
+                              issue_ids=None, save_face=True,
+                              save_mixture=False):
+    """保存面级PNG；混装面可额外保存独立的 mixture_pallet 文件。"""
+    actions = [
+        action for action in rp.ori_offsets
+        if action != 'done' and action['num_F'] == face_number
+    ]
+    paths = []
+    common_title = (
+        f'Block {block_number} Face {face_number} - {rp.block_type}')
+    if save_face:
+        paths.append(save_face_layout(
+            actions,
+            {'L': rp.L, 'W': rp.W, 'H': rp.H},
+            f'face_block{block_number:02d}_face{face_number:02d}_{stamp}',
+            title=common_title,
+            issue_ids=issue_ids,
+        ))
+    if save_mixture and rp.block_type == 'mixture':
+        paths.append(save_face_layout(
+            actions,
+            {'L': rp.L, 'W': rp.W, 'H': rp.H},
+            f'mixture_pallet_block{block_number:02d}_face{face_number:02d}_{stamp}',
+            title=f'Mixture pallet - Block {block_number} Face {face_number}',
+            issue_ids=issue_ids,
+        ))
+    return paths
+
+
+def _write_chk_path_summary(session):
+    """将 cmd_chk_path 批量检查结果写入 TXT/JSON，并返回统计信息。"""
+    results = session['results']
+    abnormal = [item for item in results if item['issues']]
+    summary = {
+        'started_at': session['started_at'],
+        'finished_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'total_grabs': len(results),
+        'normal_grabs': len(results) - len(abnormal),
+        'abnormal_grabs': len(abnormal),
+        'face_images': session.get('face_images', []),
+        'system_issues': session.get('system_issues', []),
+        'results': results,
+    }
+    output_dir = resolve_output_dir(session['stamp'][:8])
+    prefix = os.path.join(
+        output_dir, f'cmd_chk_path_summary_{session["stamp"]}')
+    json_path = prefix + '.json'
+    txt_path = prefix + '.txt'
+    with open(json_path, 'w', encoding='utf-8') as file:
+        json.dump(summary, file, ensure_ascii=False, indent=2)
+
+    lines = [
+        'cmd_chk_path 路径检查汇总',
+        f'开始时间: {summary["started_at"]}',
+        f'结束时间: {summary["finished_at"]}',
+        f'总抓数: {summary["total_grabs"]}',
+        f'正常抓数: {summary["normal_grabs"]}',
+        f'异常抓数: {summary["abnormal_grabs"]}',
+    ]
+    if abnormal:
+        lines.append('异常定位:')
+        for item in abnormal:
+            lines.append(
+                f'  Block {item["block"]} / 面 {item["face"]} / '
+                f'第 {item["grab"]} 抓 / 箱型 {item["box_type"]}: '
+                + '；'.join(item['issues']))
+    else:
+        lines.append('检查结果: 未发现异常')
+    if summary['face_images']:
+        lines.append('可视化文件:')
+        lines.extend(f'  {path}' for path in summary['face_images'])
+    if summary['system_issues']:
+        lines.append('非路径异常:')
+        lines.extend(f'  {issue}' for issue in summary['system_issues'])
+    with open(txt_path, 'w', encoding='utf-8') as file:
+        file.write('\n'.join(lines) + '\n')
+    summary['json_path'] = json_path
+    summary['txt_path'] = txt_path
+    return summary
 
 
 def _parse_stack_group(src, stack_attr='Stack', group_attr='Group'):
@@ -398,6 +559,21 @@ def _fast_forward(rp_list, be, cursor):
     while rp.robot_offsets and rp.robot_offsets[0] != 'done' and rp.robot_offsets[0]['id'] <= path_id:
         act = rp.robot_offsets.pop(0)
         last_act = act
+        # 混装断点重放时同步恢复动态 dir，保证 reserve_object 的外扩方向
+        # 与正常连续运行一致。失败保持垛序原 dir，只记录，不影响续传。
+        if rp.block_type == 'mixture' and act['area'] == 'p1':
+            try:
+                clearance = be.mixture_side_clearance(
+                    act, left_wall=0, right_wall=rp.W)
+                if clearance['blocking']:
+                    raise ValueError(
+                        f"目标区域与 {len(clearance['blocking'])} 个已码箱体重叠")
+                act['dir'] = (
+                    1 if clearance['left_gap'] <= clearance['right_gap'] else 2)
+            except Exception as exc:
+                logs.warning(
+                    f"[MIX-APP] 续传重放 Round.{act['id']} 动态方向恢复失败，"
+                    f"保持原方向: {exc}")
         be.step(act)   # action 0 累加障碍；1/2/3 自动清空，与正常流程一致
     # 当前 block 已全部消费完 → 前进到下一 block（处理断电恰在 block 边界）
     while rp_idx + 1 < len(rp_list) and (not rp.robot_offsets or all(x == 'done' for x in rp.robot_offsets)):
@@ -523,6 +699,8 @@ def main():
         dis_y = 0          # 角点激光补偿：y方向偏差，用于修正 x_goal
         # chk_value: 批量预取计数器，0=正常逐抓模式，>0=预取剩余抓次（cmd_chk_path触发）
         chk_value = 0
+        # chk_session: cmd_chk_path 本轮逐抓结果、面级图片及最终汇总。
+        chk_session = None
         # last_grab_action: get_path 刚下发的那一抓，供 cmd_stacking 计算"当前抓"宽度
         # （cmd_stacking 在 get_path 之后触发，robot_offsets[0] 已是下一抓，不能用）
         # last_grab_box_type: 那一抓的实际箱型（Mixture 内可按 Items 切换）
@@ -564,6 +742,28 @@ def main():
                     break
                 if mes_hex == cmd_chk_path:
                     chk_value = len(rp.robot_offsets) - 1
+                    _chk_stamp = time.strftime('%Y%m%d_%H%M%S')
+                    chk_session = {
+                        'stamp': _chk_stamp,
+                        'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'results': [],
+                        'face_images': [],
+                        'system_issues': [],
+                    }
+                    logs.info(
+                        f"cmd_chk_path 批量检查开始，当前 Block {rp_idx + 1}，"
+                        f"本 Block 待检查 {chk_value} 抓")
+                    if chk_value <= 0:
+                        try:
+                            _empty_summary = _write_chk_path_summary(chk_session)
+                            logs.info(
+                                "cmd_chk_path 当前无待检查路径，汇总文件: "
+                                f"{_empty_summary['txt_path']}")
+                        except Exception as _empty_summary_error:
+                            logs.warning(
+                                f"cmd_chk_path 空任务汇总保存失败: {_empty_summary_error}")
+                        finally:
+                            chk_session = None
             else:
                 mes_hex = cmd_get_path
             if mes_hex == cmd_get_pallet:
@@ -640,6 +840,7 @@ def main():
                     # 正常不应再弹出 done，切换已在 action==2 时提前完成；此处兜底
                     chk_value = 0   # 同样退出批量预取
                     continue
+                path_issues = []
                 last_grab_action = action          # 记录当前抓，供随后 cmd_stacking 对齐序号
                 last_grab_box_type = action.get('box_type', rp.box_type)
                 # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
@@ -654,6 +855,7 @@ def main():
                 boxs = be.to_box(action)
                 # 路径点语义：x0=初始悬停点，x1=过渡点（y向偏移避障），x_app=放箱接近点，x_goal=目标落箱点
                 # size=(L, Y跨度, Z高度+夹爪余量)，仅用于碰撞检测包围盒，不下发给机器人
+                mixture_clearance = None
                 if action['area'] in ('p1', 'p3'):
                     # dir: 1=从右往左放（贴左侧已放箱），2=从左往右放（贴右侧已放箱）
                     # P1 接近点 Y 偏移：approach 侧到边界距离 * 0.5，clamp [50, 100]；p3 沿用配置固定值
@@ -693,50 +895,47 @@ def main():
                         _left_ends_p3 = [_phys_right_p3(a) for a in _placed_p3 if _phys_right_p3(a) <= _y_start]
                         _dist_left = _y_start - (max(_left_ends_p3) if _left_ends_p3 else 0)
                     y_offset_app = max(-_cap, min(_cap, (_dist_right - _dist_left) * 0.5))
-                    x_app = tuple([action['pos'][0] + config_be['p1_app_offset_list'][0][0],
-                                action['pos'][1] + y_offset_app,
-                                action['pos'][2] + config_be['p1_app_offset_list'][0][2]])
-                    # 初始点x0
-                    # P3侧立时箱子z跨度为原始宽w（size[1]），P1竖放时为原始高h（size[2]）
-                    box_z = action['size'][1] if action['area'] == 'p3' else action['size'][2]
-                    if action['pos'][2]+box_z < config_be['p3_init_pos'][2]:
-                        x0 = [config_be['p1_init_pos'][0], config_be['p1_init_pos'][1], max(config_be['p1_init_pos'][2]-box_z, x_app[2])]
-                    else:
-                        if action['area'] == 'p1':
-                            _action_grab_p1 = action.get('grab_num_p1', rp.grab_num_p1)
-                            _action_box_w = action['size'][1]
-                            x0 = [config_be['p1_init_pos'][0],
-                                  max(rp.W - (_action_grab_p1 + 1) * _action_box_w, x_app[1]),
-                                  max(config_be['p3_init_pos'][2]-box_z, x_app[2])]
-                        else:
-                            x0 = [config_be['p3_init_pos'][0], config_be['p3_init_pos'][1], max(config_be['p3_init_pos'][2]-box_z, x_app[2])]
-                    # x0[2] = x0[2]-box_z
-                    if action['pos'][2] < box_z:
-                        x0[0] = 200
-                    # 过渡点x1
-                    if action['pos'][2]+box_z < config_be['p3_init_pos'][2]:
-                        if action['dir'] == 1:
-                            x1 = [x0[0],
-                                x_app[1] + action['size'][1]/2 if (action['pos'][1] < action['size'][1]) and (action['pos'][2] <= 2*box_z) else x_app[1],
-                                x0[2]]
-                        else:
-                            x1 = [x0[0],
-                                  x_app[1],
-                                  x0[2]]
-                    else:
-                        x1 = [100 if action['area']=='p1' else x0[0],
-                            x0[1] if action['area']=='p1' else x_app[1],
-                            x0[2]]
-                    actual_num = sum(action['num'])
-                    if action['area'] == 'p1':
-                        size = (action['size'][0],
-                                action['size'][1] * actual_num,
-                                action['size'][2] + reserve_grip[2])
-                    else:
-                        # p3 侧立：箱子 W/H 互换，沿 y 方向按箱高累积，高度为箱宽
-                        size = (action['size'][0],
-                                action['size'][2] * actual_num,
-                                action['size'][1] + reserve_grip[2])
+                    fallback_dir = action['dir']
+                    fallback_y_offset_app = y_offset_app
+                    mixture_clearance = None
+
+                    # 混装面不能使用“底部 Z 完全相等”识别同层。按已经实际码放的
+                    # 箱体 AABB 查找与当前抓 X/Z 有效重叠的左右障碍，并动态修正 dir。
+                    if rp.block_type == 'mixture' and action['area'] == 'p1':
+                        try:
+                            mixture_clearance = be.mixture_side_clearance(
+                                action,
+                                left_wall=0,
+                                right_wall=rp.W,
+                                min_z_overlap=float(
+                                    config_be.get('mixture_z_overlap_min', 20.0)),
+                            )
+                            if mixture_clearance['blocking']:
+                                raise ValueError(
+                                    f"目标区域与 {len(mixture_clearance['blocking'])} 个已码箱体重叠")
+                            left_gap = mixture_clearance['left_gap']
+                            right_gap = mixture_clearance['right_gap']
+                            if left_gap < 0 or right_gap < 0:
+                                raise ValueError(
+                                    f"左右间隙为负数: left={left_gap:.1f}, right={right_gap:.1f}")
+                            y_offset_app = max(
+                                -_cap,
+                                min(_cap, (right_gap - left_gap) * 0.5),
+                            )
+                            action['dir'] = 1 if left_gap <= right_gap else 2
+                        except Exception as _mix_neighbor_error:
+                            mixture_clearance = None
+                            action['dir'] = fallback_dir
+                            y_offset_app = fallback_y_offset_app
+                            path_issues.append(
+                                f"混装空间邻箱分析失败，已回退原APP: {_mix_neighbor_error}")
+                            logs.warning(
+                                f"[MIX-APP] Round.{action['id']} 空间邻箱分析失败，"
+                                f"保持原APP策略: {_mix_neighbor_error}")
+
+                    x0, x1, x_app, size = _build_p1_p3_approach(
+                        action, rp, config_be, reserve_grip,
+                        y_offset_app, direction=action['dir'])
                 elif action['area'] == 'p2':
                     x_app = tuple([action['pos'][0] + config_be['p1_app_offset_list'][0][0],
                                 action['pos'][1] + config_be['p1_app_offset_list'][0][1],
@@ -749,17 +948,86 @@ def main():
                 else:
                     raise Exception('unknown area ! ')
 
-                #  角点信息引入补正
-                if config_be['use_corner']:
-                    if action['dir'] == 2:
-                        x_goal = tuple([action['pos'][0],
-                                        action['pos'][1] + np.clip((dis_y - rp.W), 0, 40),
-                                        action['pos'][2]])
-                        logs.warning('Goal has been corrected, value:{:.2f}'.format(np.clip((dis_y - rp.W), 0, 40)))
-                    else:
-                        x_goal = tuple(action['pos'])
-                else:
-                    x_goal = tuple(action['pos'])
+                # 角点信息引入补正。混装候选轨迹也使用补正后的目标点验证。
+                x_goal = _candidate_goal(
+                    action, rp, config_be, dis_y, action['dir'])
+
+                # 混装面 APP 候选：连续验证 x0→x1→APP→goal。动态策略任何异常
+                # 或所有候选均碰撞时，恢复旧 dir/APP，保持原流程继续下发，仅记录日志。
+                if mixture_clearance is not None:
+                    try:
+                        raw_candidates = [y_offset_app]
+                        raw_candidates.extend(config_be.get(
+                            'mixture_app_y_candidates', [0, 50, -50, 100, -100]))
+                        raw_candidates.append(fallback_y_offset_app)
+                        candidates = []
+                        for value in raw_candidates:
+                            value = max(-_cap, min(_cap, float(value)))
+                            if not any(abs(value - old) < 1e-6 for old in candidates):
+                                candidates.append(value)
+
+                        chosen = None
+                        last_collision = None
+                        sample_step = float(config_be.get(
+                            'mixture_path_sample_step', 10.0))
+                        for candidate_offset in candidates:
+                            candidate_x0, candidate_x1, candidate_app, candidate_size = \
+                                _build_p1_p3_approach(
+                                    action, rp, config_be, reserve_grip,
+                                    candidate_offset, direction=action['dir'])
+                            # 整抓在 APP 处不得越过车厢左右边界。
+                            if (candidate_app[1] < 0
+                                    or candidate_app[1] + candidate_size[1] > rp.W):
+                                continue
+                            candidate_goal = _candidate_goal(
+                                action, rp, config_be, dis_y, action['dir'])
+                            candidate_path = [
+                                candidate_x0, candidate_x1,
+                                candidate_app, candidate_goal,
+                            ]
+                            is_safe, collision = be.trajectory_collision_free(
+                                candidate_path,
+                                candidate_size,
+                                sample_step=sample_step,
+                            )
+                            if is_safe:
+                                chosen = (
+                                    candidate_offset, candidate_x0, candidate_x1,
+                                    candidate_app, candidate_size, candidate_goal,
+                                )
+                                break
+                            last_collision = collision
+
+                        if chosen is None:
+                            raise RuntimeError(
+                                f"没有无碰撞APP候选，最后碰撞信息={last_collision}")
+
+                        (y_offset_app, x0, x1, x_app,
+                         size, x_goal) = chosen
+                        logs.info(
+                            f"[MIX-APP] Round.{action['id']} 空间邻箱={mixture_clearance['relevant_count']}"
+                            f" left_gap={mixture_clearance['left_gap']:.1f}mm"
+                            f" right_gap={mixture_clearance['right_gap']:.1f}mm"
+                            f" dir={fallback_dir}->{action['dir']}"
+                            f" APP_Y偏移={fallback_y_offset_app:.1f}->{y_offset_app:.1f}mm")
+                    except Exception as _mix_path_error:
+                        action['dir'] = fallback_dir
+                        y_offset_app = fallback_y_offset_app
+                        x0, x1, x_app, size = _build_p1_p3_approach(
+                            action, rp, config_be, reserve_grip,
+                            y_offset_app, direction=action['dir'])
+                        x_goal = _candidate_goal(
+                            action, rp, config_be, dis_y, action['dir'])
+                        path_issues.append(
+                            f"混装候选轨迹失败，已回退原APP: {_mix_path_error}")
+                        logs.warning(
+                            f"[MIX-APP] Round.{action['id']} 候选轨迹规划失败，"
+                            f"保持原APP策略: {_mix_path_error}")
+
+                if config_be['use_corner'] and action['dir'] == 2:
+                    logs.warning(
+                        'Goal has been corrected, value:{:.2f}'.format(
+                            np.clip((dis_y - rp.W), 0, 40)))
 
                 # 运动学辅助：奇异性/限位检查 + x_app 自动调整
                 if kin is not None:
@@ -774,6 +1042,7 @@ def main():
                             q_info = str(kin.q_deg(kr['q'])) if kr.get('q') is not None else 'N/A'
                             margin_info = str(kin.joint_limit_margin_deg(kr['q'])) if kr.get('q') is not None else 'N/A'
                             logs.warning(f"[KIN] Round.{rid} {label} {kr['msg']} | q={q_info} | 限位余量={margin_info}")
+                            path_issues.append(f"运动学异常 {label}: {kr['msg']}")
 
                             # ── x_app 自动规避（x_goal / x_init / x0 不改动）──
                             if label == 'x_app(接近1)':
@@ -808,6 +1077,25 @@ def main():
                         extra_goals.append((x_goal[0], y, x_goal[2]))
                 #  开始验证
                 path = [x0, x1, x_app, x_goal] + extra_goals
+                if chk_session is not None:
+                    try:
+                        _continuous_safe, _continuous_detail = \
+                            be.trajectory_collision_free(
+                                path[:4], size,
+                                sample_step=float(config_be.get(
+                                    'mixture_path_sample_step', 10.0)))
+                        if not _continuous_safe:
+                            path_issues.append(
+                                "连续轨迹干涉: "
+                                f"segment={_continuous_detail['segment']}, "
+                                f"ratio={_continuous_detail['ratio']:.3f}, "
+                                f"point={tuple(round(v, 1) for v in _continuous_detail['point'])}")
+                    except Exception as _continuous_error:
+                        _issue = f"连续轨迹检查执行失败: {_continuous_error}"
+                        chk_session['system_issues'].append(
+                            f"Block {rp_idx + 1} / 面 {action['num_F']} / "
+                            f"第 {action['id']} 抓: {_issue}")
+                        logs.warning(_issue)
                 if config_be['chk_enable']:
                     logs.info(f"x_goal:{x_goal[0]:.2f}, {x_goal[1]:.2f}, {x_goal[2]:.2f}"
                               + (f"  extra_goals({len(extra_goals)}段): " +
@@ -818,6 +1106,10 @@ def main():
                         # 只检查过渡/接近点（x0,x1,x_app），落箱点本身不做障碍检测
                         for pt_idx in range(3):
                             if not X_chk.obstacle_free((path[pt_idx][0], path[pt_idx][1], path[pt_idx][2]), size):
+                                path_issues.append(
+                                    f"路径点{pt_idx}干涉风险: "
+                                    f"x={path[pt_idx][0]:.1f}, y={path[pt_idx][1]:.1f}, "
+                                    f"z={path[pt_idx][2]:.1f}")
                                 logs.warning (
                                     f"第{pt_idx}个点可能存在干涉风险！x: {path[pt_idx][0]}, y: {path[pt_idx][1]}, z: {path[pt_idx][2]}")
                         # P1 抓取余量检查：计算手抓左右间隙，任意一侧不足阈值时告警
@@ -827,35 +1119,53 @@ def main():
                             # y_grip_right：手抓实际占宽右边界，不含放置后的开缝间隙
                             y_grip_right = y_start + sum(action['num']) * action['size'][1]
                             cur_h = action['pos'][2]
-                            # 从 ori_offsets 找同层已放 p1 动作，用物理坐标直接算间隙（不依赖 obstacles padding）
-                            placed = [a for a in rp.ori_offsets
-                                      if a != 'done'
-                                      and a['area'] == 'p1'
-                                      and a['pos'][2] == cur_h
-                                      and a['num_F'] == action['num_F']
-                                      and a['id'] < action['id']]
-                            def _phys_right(a):
-                                return a['pos'][1] + sum(a['num']) * a['size'][1] + sum(a.get('gaps', []))
-                            left_ends    = [_phys_right(a) for a in placed if _phys_right(a) <= y_start]
-                            right_starts = [a['pos'][1]    for a in placed if a['pos'][1]    >= y_grip_right]
-                            # P1 区左/右墙坐标
-                            p1_left_wall  = 0
-                            p1_right_wall = rp.W - rp.N2 * rp.l
-                            # 当前抓放置后最右箱位（含组内缝隙），用于对墙间隙计算
-                            y_placed_right = y_grip_right + sum(action.get('gaps', []))
-                            if left_ends or right_starts:
-                                left_gap  = (y_start - max(left_ends)
-                                             if left_ends else y_start - p1_left_wall)
+                            if rp.block_type == 'mixture' and mixture_clearance is not None:
+                                left_gap = mixture_clearance['left_gap']
+                                right_gap = mixture_clearance['right_gap']
+                                left_src = '箱' if mixture_clearance['left_is_box'] else '墙'
+                                right_src = '箱' if mixture_clearance['right_is_box'] else '墙'
+                                has_side_reference = True
+                            else:
+                                # 规则垛保持原来的同底面 Z 判断。
+                                placed = [a for a in rp.ori_offsets
+                                          if a != 'done'
+                                          and a['area'] == 'p1'
+                                          and a['pos'][2] == cur_h
+                                          and a['num_F'] == action['num_F']
+                                          and a['id'] < action['id']]
+                                def _phys_right(a):
+                                    return (a['pos'][1]
+                                            + sum(a['num']) * a['size'][1]
+                                            + sum(a.get('gaps', [])))
+                                left_ends = [
+                                    _phys_right(a) for a in placed
+                                    if _phys_right(a) <= y_start]
+                                right_starts = [
+                                    a['pos'][1] for a in placed
+                                    if a['pos'][1] >= y_grip_right]
+                                p1_left_wall = 0
+                                p1_right_wall = rp.W - rp.N2 * rp.l
+                                y_placed_right = (
+                                    y_grip_right + sum(action.get('gaps', [])))
+                                left_gap = (y_start - max(left_ends)
+                                            if left_ends else y_start - p1_left_wall)
                                 right_gap = (min(right_starts) - y_grip_right
-                                             if right_starts else p1_right_wall - y_placed_right)
-                                left_src  = '箱' if left_ends  else '墙'
+                                             if right_starts
+                                             else p1_right_wall - y_placed_right)
+                                left_src = '箱' if left_ends else '墙'
                                 right_src = '箱' if right_starts else '墙'
+                                has_side_reference = bool(left_ends or right_starts)
+                            if has_side_reference:
                                 # 期望方向：间隙小的一侧贴紧（left<=right → dir=1贴左，否则 dir=2贴右）
                                 expected_dir = 1 if left_gap <= right_gap else 2
                                 dir_ok = action['dir'] == expected_dir
                                 dir_info = (f"dir={action['dir']}({'<-L' if action['dir']==1 else 'R->'})"
                                             f" 期望={expected_dir} {'✓' if dir_ok else '✗ 方向不符'}")
                                 if left_gap + right_gap < _MIN_SIDE_GAP:
+                                    path_issues.append(
+                                        f"两侧间隙不足: left={left_gap:.1f}mm, "
+                                        f"right={right_gap:.1f}mm, "
+                                        f"阈值={_MIN_SIDE_GAP}mm")
                                     logs.warning(
                                         f"[CHK] Round.{action['id']} 两侧间隙之和不足！"
                                         f" left_gap={left_gap:.1f}mm({left_src})"
@@ -869,9 +1179,33 @@ def main():
                                         f"  left_gap={left_gap:.1f}mm({left_src})"
                                         f"  right_gap={right_gap:.1f}mm({right_src})"
                                         f"  {dir_info}")
-                    logs.info("check path ok!")
+                                if not dir_ok:
+                                    path_issues.append(
+                                        f"放置方向不符: dir={action['dir']}, "
+                                        f"expected={expected_dir}")
+                    if path_issues:
+                        logs.warning(
+                            f"Round.{action['id']} check path发现"
+                            f" {len(path_issues)} 项异常")
+                    else:
+                        logs.info("check path ok!")
                 end_time = time.time()
                 logs.debug("it cost {:.2f} s".format(end_time - start_time))
+
+                if chk_session is not None:
+                    chk_session['results'].append({
+                        'block': rp_idx + 1,
+                        'block_type': rp.block_type,
+                        'face': int(action['num_F']),
+                        'grab': int(action['id']),
+                        'box_type': str(action.get('box_type', rp.box_type)),
+                        'area': action['area'],
+                        'dir': int(action['dir']),
+                        'app': [round(float(value), 2) for value in x_app],
+                        'goal': [round(float(value), 2) for value in x_goal],
+                        'cost_sec': round(end_time - start_time, 4),
+                        'issues': list(dict.fromkeys(path_issues)),
+                    })
 
                 # 发送路径数据：每个路径点编码为41字节块
                 # 中间点 flag = 区域码，末点 flag = 动作码
@@ -893,19 +1227,67 @@ def main():
     
                 #可视化
                 if show_env:
-                    ts = time.strftime("%Y%m%d_%H%M%S")
-                    plot = Plot(f"path_{ts}_id{action['id']}")
-                    # Plot 方法只用 X.dimensions，可视化无需 rtree，用轻量对象代替
-                    _X3 = type('_X', (), {'dimensions': 3})()
-                    if path is not None:
-                        # 路径点颜色：x0=浅绿 / x1=青 / x_app=蓝 / x_goal=红 / 开缝后续落点=橙
-                        path_colors = ['lightgreen', 'cyan', 'blue', 'red'] + ['orange'] * (len(path) - 4)
-                        plot.plot_path(_X3, path, size, colors=path_colors)
-                    if be.display_objects:
-                        plot.plot_obstacles(_X3, be.display_objects)
-                    plot.plot_start(_X3, x0)
-                    plot.plot_goal(_X3, x_goal)
-                    plot.draw(auto_open=False)
+                    try:
+                        ts = time.strftime("%Y%m%d_%H%M%S")
+                        plot = Plot(
+                            f"path_block{rp_idx + 1:02d}_face{action['num_F']:02d}_"
+                            f"{ts}_id{action['id']}")
+                        # Plot 方法只用 X.dimensions，可视化无需 rtree，用轻量对象代替
+                        _X3 = type('_X', (), {'dimensions': 3})()
+                        if path is not None:
+                            # x0=浅绿 / x1=青 / APP=蓝 / goal=红 / 后续落点=橙
+                            path_colors = (
+                                ['lightgreen', 'cyan', 'blue', 'red']
+                                + ['orange'] * (len(path) - 4))
+                            plot.plot_path(_X3, path, size, colors=path_colors)
+                        if be.display_objects:
+                            plot.plot_obstacles(_X3, be.display_objects)
+                        plot.plot_start(_X3, x0)
+                        plot.plot_goal(_X3, x_goal)
+                        plot.draw(auto_open=False)
+                    except Exception as _path_plot_error:
+                        _plot_issue = f"单抓路径可视化保存失败: {_path_plot_error}"
+                        if chk_session is not None:
+                            chk_session['system_issues'].append(
+                                f"Block {rp_idx + 1} / 面 {action['num_F']} / "
+                                f"第 {action['id']} 抓: {_plot_issue}")
+                        logs.warning(_plot_issue)
+
+                # 面完成时保存整面PNG。show_env=true 时正常任务也保存；
+                # cmd_chk_path 批量检查时无论 show_env 开关都保存。
+                if action['action'] in (1, 2, 3) and (show_env or chk_session is not None):
+                    try:
+                        _face_issue_ids = set()
+                        if chk_session is not None:
+                            _face_issue_ids = {
+                                item['grab'] for item in chk_session['results']
+                                if item['block'] == rp_idx + 1
+                                and item['face'] == int(action['num_F'])
+                                and item['issues']
+                            }
+                        _face_stamp = (
+                            chk_session['stamp'] if chk_session is not None
+                            else time.strftime('%Y%m%d_%H%M%S'))
+                        _saved_images = _save_face_visualizations(
+                            rp,
+                            block_number=rp_idx + 1,
+                            face_number=int(action['num_F']),
+                            stamp=_face_stamp,
+                            issue_ids=_face_issue_ids,
+                            save_face=True,
+                            save_mixture=(rp.block_type == 'mixture'),
+                        )
+                        if chk_session is not None:
+                            chk_session['face_images'].extend(_saved_images)
+                        for _image_path in _saved_images:
+                            logs.info(f"面级可视化已保存: {_image_path}")
+                    except Exception as _face_plot_error:
+                        _plot_issue = f"面级可视化保存失败: {_face_plot_error}"
+                        if chk_session is not None:
+                            chk_session['system_issues'].append(
+                                f"Block {rp_idx + 1} / 面 {action['num_F']}: "
+                                f"{_plot_issue}")
+                        logs.warning(_plot_issue)
 
                 # 更新环境
                 be.step(action)
@@ -940,6 +1322,32 @@ def main():
                         logs.info("码垛全部完成，已清除断点续传记录")
                 if chk_value != 0:
                     chk_value -= 1
+                    if chk_value == 0 and chk_session is not None:
+                        try:
+                            _chk_summary = _write_chk_path_summary(chk_session)
+                            if _chk_summary['abnormal_grabs']:
+                                logs.warning(
+                                    "cmd_chk_path 批量检查完成："
+                                    f"总抓数={_chk_summary['total_grabs']}，"
+                                    f"异常抓数={_chk_summary['abnormal_grabs']}")
+                                for _item in _chk_summary['results']:
+                                    if _item['issues']:
+                                        logs.warning(
+                                            f"[CHK-SUMMARY] Block {_item['block']} / "
+                                            f"面 {_item['face']} / 第 {_item['grab']} 抓: "
+                                            + '；'.join(_item['issues']))
+                            else:
+                                logs.info(
+                                    "cmd_chk_path 批量检查完成："
+                                    f"共 {_chk_summary['total_grabs']} 抓，未发现异常")
+                            logs.info(
+                                f"cmd_chk_path 汇总文件: {_chk_summary['txt_path']}")
+                        except Exception as _chk_summary_error:
+                            logs.warning(
+                                f"cmd_chk_path 汇总保存失败，仅保留运行日志: "
+                                f"{_chk_summary_error}")
+                        finally:
+                            chk_session = None
             elif mes_hex == cmd_stacking:
                 # 双雷达采集 → 堆叠检测 → 发送结果 → 保存点云（分段计时）
                 pc1 = pc2 = None
