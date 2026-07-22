@@ -3,6 +3,26 @@ import numpy as np
 import math
 import time
 import copy
+import os
+
+
+_VISUALIZATION_BACKEND_READY = False
+
+
+def _prepare_visualization_backend():
+    """仅在实际显示窗口时，为当前 Python 进程选择可用的 XWayland 后端。"""
+    global _VISUALIZATION_BACKEND_READY
+    if _VISUALIZATION_BACKEND_READY:
+        return
+    if (os.environ.get('DISPLAY') and
+            os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland'):
+        # Open3D 0.19 Legacy Visualizer 在本机 Wayland/EGL 下无法初始化 GLEW。
+        # 这里只修改当前 Python 进程；不会修改系统、桌面会话或其他程序。
+        os.environ.pop('WAYLAND_DISPLAY', None)
+        os.environ['XDG_SESSION_TYPE'] = 'x11'
+        os.environ['GDK_BACKEND'] = 'x11'
+        print('Open3D可视化：当前进程使用 XWayland 后端')
+    _VISUALIZATION_BACKEND_READY = True
 
 
 # 0630 车厢内点云的地面法向 Ry 中位数，作为固定零点。
@@ -806,6 +826,8 @@ def _process_point_cloud_impl(pcd, method):
     view =  True
     debug = view
     view_normal = False
+    if view or view_normal:
+        _prepare_visualization_backend()
     corner_list = []
     # 1: 车头波纹板；2: I垛面；3: L垛面；
     # 4: I垛面角点，并返回相对车厢内基准的 Ry；
@@ -1632,6 +1654,8 @@ def process_point_cloud(pcd, method):
         return []
 
 
-file_path = "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/pcd_logs/0716/trun_cloud_20260716_101157_slow1.pcd"
-pcd = o3d.io.read_point_cloud(file_path)
-process_point_cloud(pcd, 2)
+if __name__ == '__main__':
+    file_path = ("/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
+                 "pcd_logs/0716/trun_cloud_20260716_101157_slow1.pcd")
+    pcd = o3d.io.read_point_cloud(file_path)
+    process_point_cloud(pcd, 2)

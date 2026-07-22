@@ -1358,6 +1358,7 @@ def main():
                     # 保护：未触发过 get_path（无当前抓）时理论宽度发 -1，仍照常测量并上报实测
                     _rel_top_h = None    # 当前行顶面距地板高度(米)，供测宽锁定当前行 Z
                     _box_h_m = None      # 当前抓箱子竖向高度(米)
+                    _single_box_width = None  # 当前姿态下单箱沿垛面宽度方向的尺寸(mm)
                     if last_grab_action is None or last_grab_action == 'done':
                         _grab_width = -1
                         _box_type = (rp.robot_offsets[0].get('box_type', rp.box_type)
@@ -1366,7 +1367,9 @@ def main():
                     else:
                         _cur = last_grab_action
                         _n = sum(_cur['num'])
-                        _grab_width = _n * (_cur['size'][2] if _cur['area'] == 'p3' else _cur['size'][1])
+                        _single_box_width = (
+                            _cur['size'][2] if _cur['area'] == 'p3' else _cur['size'][1])
+                        _grab_width = _n * _single_box_width
                         _box_type = last_grab_box_type
                         # 当前行高度：pos[2] 为放置点底面距地板高度(mm)，加箱竖向跨度=顶面相对高度
                         # p3 侧立时竖向跨度为原始宽 size[1]，p1 竖放时为原始高 size[2]
@@ -1388,7 +1391,9 @@ def main():
                         # 偏航补偿角：由该抓所属 block 箱型对应的拍照位 J1 与正对 J1 之差决定
                         _yaw_off = _yaw_offset_for_box(_box_type)
                         measured = check_stacking(_grab_width, pc1, pc2, yaw_offset_deg=_yaw_off,
-                                                  rel_top_h=_rel_top_h, box_h=_box_h_m)
+                                                  rel_top_h=_rel_top_h, box_h=_box_h_m,
+                                                  box_width_mm=_single_box_width,
+                                                  log_callback=logs.warning, view=False)
                         t_compute = time.time() - _t1
                         if measured is None:
                             # 宽度计算失败：发送 status=2（不再依赖异常兜底）

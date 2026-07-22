@@ -2,7 +2,9 @@
 
 卡车自动装载 ROS 2 工作区，包含激光雷达接入、点云采集与检测、车厢角点/宽度计算、垛序解析、机器人路径规划及机器人通信等功能。
 
-当前开发环境以 ROS 2 Jazzy、Python 3.12 为基准。
+当前开发环境以 Ubuntu 24.04、ROS 2 Jazzy、Python 3.12 为基准。现场电脑如果使用其他
+Ubuntu/ROS 版本，应保证虚拟环境与该系统的 `/usr/bin/python3` 主版本一致，不能直接复制
+另一台电脑创建好的 `venv`。
 
 ## 功能包
 
@@ -29,19 +31,148 @@ truck_loading_ws/
 
 ## 环境准备
 
-先加载 ROS 2 环境：
+### 新电脑首次部署
+
+先确认系统 Python、ROS 版本和工作空间位置：
+
+```bash
+/usr/bin/python3 --version
+source /opt/ros/jazzy/setup.bash
+echo "$ROS_DISTRO"
+pwd
+```
+
+安装系统依赖。OpenCV 使用系统包，便于与 ROS 及可视化组件共用：
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-pip python3-opencv libgl1 libglib2.0-0
+```
+
+在工作空间外创建虚拟环境。必须使用系统的 `/usr/bin/python3`，并启用
+`--system-site-packages`，否则虚拟环境无法找到通过 APT 安装的 `cv2`、`rclpy` 和 ROS 消息包：
+
+```bash
+/usr/bin/python3 -m venv --system-site-packages ~/venv
+source ~/venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+cd ~/workcells/truck_loading_ws
+```
+
+OpenCV 4.5/4.6 等系统包是按照 NumPy 1.x 接口编译的。项目环境将 NumPy 固定在 2.0 以下，
+避免出现 `_ARRAY_API not found` 或 `numpy.core.multiarray failed to import`：
+
+```bash
+python -m pip install "numpy>=1.26.4,<2"
+python -m pip install -r src/robot_process/requirements.txt
+```
+
+如果从仓库根目录统一安装 ROS 包依赖，也可以执行：
+
+```bash
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+`robot_process` 的主要 Python 依赖记录在 `src/robot_process/requirements.txt`，包括 NumPy、
+Open3D、Rtree、Plotly、grpcio、protobuf 和 colorlog。ROS 消息、`rclpy`、OpenCV 等依赖
+由 ROS 2 或系统环境提供。
+
+### 环境验证
+
+安装完成后不要只检查 `pip list`，应实际导入节点用到的模块：
+
+```bash
+python -c "import sys; print('Python:', sys.version); print('Executable:', sys.executable)"
+python -c "import numpy; print('NumPy:', numpy.__version__, numpy.__file__)"
+python -c "import cv2; print('OpenCV:', cv2.__version__, cv2.__file__)"
+python -c "import open3d; print('Open3D:', open3d.__version__)"
+python -c "import rclpy; print('rclpy: OK')"
+```
+
+OpenCV 的版本属性是 `cv2.__version__`，`version` 两侧各有两个下划线。
+
+推荐版本组合：
+
+| 组件 | 推荐值 | 说明 |
+| --- | --- | --- |
+| Python | 与 `/usr/bin/python3` 一致 | 系统 OpenCV、ROS Python 扩展与具体 Python 主版本绑定 |
+| NumPy | `1.26.4` | 当前 OpenCV/Open3D 组合稳定，禁止自动升级到 2.x |
+| OpenCV | 系统 APT 版本 | Ubuntu 22.04 常见 4.5.4，Ubuntu 24.04 常见 4.6.0 |
+| Open3D | `>=0.19.0` | 用于角点及垛面检测 |
+
+### 已有虚拟环境找不到 `cv2`
+
+先确认系统 Python 可以导入 OpenCV：
+
+```bash
+/usr/bin/python3 -c "import cv2; print(cv2.__version__)"
+```
+
+如果系统可以导入、虚拟环境不可以，检查：
+
+```bash
+source ~/venv/bin/activate
+cat "$VIRTUAL_ENV/pyvenv.cfg"
+```
+
+若其中为 `include-system-site-packages = false`，改成 `true` 后重新进入环境：
+
+```bash
+sed -i \
+  's/include-system-site-packages = false/include-system-site-packages = true/' \
+  "$VIRTUAL_ENV/pyvenv.cfg"
+deactivate
+source ~/venv/bin/activate
+```
+
+如果虚拟环境的 Python 主版本与 `/usr/bin/python3` 不一致，不要继续复用该环境，应使用上面的
+首次部署命令重新创建。系统 OpenCV 的 `.so` 文件不能跨 Python 3.10/3.12 直接加载。
+
+### OpenCV 与 NumPy 2.x 冲突
+
+出现以下信息时，说明系统 OpenCV 是按照 NumPy 1.x 编译的，但运行时加载了 NumPy 2.x：
+
+```text
+A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x
+AttributeError: _ARRAY_API not found
+ImportError: numpy.core.multiarray failed to import
+```
+
+在虚拟环境中修复：
+
+```bash
+source ~/venv/bin/activate
+python -m pip install --no-cache-dir --force-reinstall "numpy==1.26.4"
+python -c "import numpy, cv2; print(numpy.__version__, cv2.__version__)"
+```
+
+如果连 `/usr/bin/python3` 也出现同样错误，通常是用户目录或 `/usr/local` 中安装的 NumPy 2.x
+覆盖了 APT 版本。先查看实际加载位置：
+
+```bash
+/usr/bin/python3 -c "import numpy; print(numpy.__version__, numpy.__file__)"
+```
+
+若路径位于 `~/.local/` 或 `/usr/local/`，卸载这份 pip NumPy，再恢复系统包：
+
+```bash
+/usr/bin/python3 -m pip uninstall -y numpy
+sudo apt install --reinstall python3-numpy python3-opencv
+/usr/bin/python3 -c "import numpy, cv2; print(numpy.__version__, cv2.__version__)"
+```
+
+系统 Python 中不要再用 pip 安装 NumPy 2.x；项目需要的 1.26.4 只安装在虚拟环境中。
+
+### 每个终端的加载顺序
+
+先加载 ROS 2 环境，再进入虚拟环境：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+source ~/venv/bin/activate
+cd ~/workcells/truck_loading_ws
+source install/setup.bash
 ```
-
-`robot_process` 的主要 Python 依赖记录在 `src/robot_process/requirements.txt`：
-
-```bash
-python3 -m pip install -r src/robot_process/requirements.txt
-```
-
-主要依赖包括 NumPy、Open3D、Rtree、Plotly、grpcio、protobuf 和 colorlog。ROS 消息、`rclpy`、PCL 等依赖由 ROS 2 或系统环境提供。
 
 ## 构建工作区
 
@@ -68,6 +199,7 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+source ~/venv/bin/activate
 source install/setup.bash
 ```
 
@@ -218,6 +350,8 @@ python3 -m unittest -v src/robot_process/test/test_mixture.py
 
 - 找不到 ROS 包或节点：确认当前终端已经加载 `/opt/ros/jazzy/setup.bash` 和本工作区 `install/setup.bash`。
 - 找不到 `open3d`、`rtree` 或 `grpc`：确认运行节点的 Python 与安装依赖时使用的是同一个环境。
+- 虚拟环境找不到 `cv2`：确认 `pyvenv.cfg` 中为 `include-system-site-packages = true`，并确认虚拟环境与 `/usr/bin/python3` 主版本相同。
+- OpenCV 报 `_ARRAY_API not found`：当前加载了 NumPy 2.x，按照“OpenCV 与 NumPy 2.x 冲突”一节降级到 NumPy 1.26.4。
 - 在线模式一直等待：依次检查规划器是否连接 gRPC `5007`、机器人是否连接 TCP `8001`，以及防火墙和 IP 配置。
 - 点云没有数据：检查雷达网络参数、实际发布话题以及节点订阅的 `/lidar_points1`、`/lidar_points2` 是否一致。
 - 修改 proto 后字段未生效：重新生成 `*_pb2.py`，再重新构建并加载工作区。
