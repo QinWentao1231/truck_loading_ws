@@ -258,6 +258,15 @@ ros2 run hesai_ros_driver hesai_ros_driver_node
 
 在线模式下，程序在 `5007` 端口接收规划器 gRPC 垛型数据，并在配置的 TCP 端口等待机器人连接。离线模式从 `src/robot_process/robot_process/pkl_data/` 读取垛型文件。
 
+垛面检测点云默认保存到当前 `robot_process` 功能包所属工作空间的
+`log/robot_process/pcd_logs/`。程序通过包自身路径定位工作空间，不使用其他 overlay
+工作空间的优先顺序。需要固定到指定磁盘或目录时，在启动节点前设置：
+
+```bash
+export ROBOT_PROCESS_PCD_DIR=/absolute/path/to/pcd_logs
+ros2 run robot_process robot_process_node
+```
+
 ## 当前混装面接口
 
 混装面使用扁平的 `Mixture` 列表，不再额外嵌套 `Items`：

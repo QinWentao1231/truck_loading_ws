@@ -806,17 +806,20 @@ def _fit_tilt_projection_frame(pts, z_min, z_max):
     if v_axis[1] < 0.0:
         v_axis *= -1.0
 
-    relative_xy = roi[:, :2] - origin_xy
-    u_values = relative_xy @ u_axis
-    v_values = relative_xy @ v_axis
+    # U/V 投影只与本帧局部坐标系有关。后面每个“深度峰×窗口”都会复用，
+    # 因此在这里对整帧只计算一次，避免 _find_tilt_pair_at_depth 重复投影。
+    all_relative_xy = pts[:, :2] - origin_xy
+    all_u_values = all_relative_xy @ u_axis
+    all_v_values = all_relative_xy @ v_axis
+    u_values = all_u_values[roi_mask]
+    v_values = all_v_values[roi_mask]
     all_mask = (
         (pts[:, 0] >= TILT_PASS_X[0]) & (pts[:, 0] < TILT_PASS_X[1]) &
         (pts[:, 1] >= PASS_Y[0]) & (pts[:, 1] <= PASS_Y[1]) &
         (pts[:, 2] >= PASS_Z[0]) & (pts[:, 2] <= PASS_Z[1])
     )
     # U 窗口以全垛中心为基准，避免某一层只有单侧点云时窗口偏移。
-    u_center = float(np.median(
-        (pts[all_mask, :2] - origin_xy) @ u_axis))
+    u_center = float(np.median(all_u_values[all_mask]))
     u_min = u_center + TILT_PASS_X[0]
     u_max = u_center + TILT_PASS_X[1]
     within_u = (u_values >= u_min) & (u_values < u_max)
@@ -851,6 +854,13 @@ def _fit_tilt_projection_frame(pts, z_min, z_max):
         for index in peak_indices
     ]
 
+    # 所有深度窗口共有同一个 U/Z 范围。提前裁成基础点集，后续每个窗口
+    # 只需做一次 V 范围筛选；边界条件与原逻辑保持完全一致。
+    tilt_base_mask = (
+        (all_u_values >= u_min) & (all_u_values < u_max) &
+        (pts[:, 2] >= z_min) & (pts[:, 2] < z_max)
+    )
+
     return {
         'origin_xy': origin_xy,
         'u_axis': u_axis,
@@ -860,6 +870,9 @@ def _fit_tilt_projection_frame(pts, z_min, z_max):
         'yaw_deg': _normalize_xz_line_angle(
             math.degrees(math.atan2(u_axis[1], u_axis[0]))),
         'roi': roi,
+        'tilt_base_pts': pts[tilt_base_mask],
+        'tilt_base_u': all_u_values[tilt_base_mask],
+        'tilt_base_v': all_v_values[tilt_base_mask],
     }
 
 
@@ -1121,24 +1134,35 @@ def _show_tilt_result(tilt_roi, front_pts, result):
 def _find_tilt_pair_at_depth(pts, frame, z_min, z_max,
                              front_depth, v_front):
     """在一个独立的局部V深度窗口内寻找最佳斜边对。"""
-    relative_xy = pts[:, :2] - frame['origin_xy']
-    u_values = relative_xy @ frame['u_axis']
-    v_values = relative_xy @ frame['v_axis']
     u_min, u_max = frame['u_range']
     v_back = v_front - front_depth
-    tilt_mask = (
-        (u_values >= u_min) & (u_values < u_max) &
-        (v_values >= v_back) & (v_values <= v_front) &
-        (pts[:, 2] >= z_min) & (pts[:, 2] < z_max)
-    )
-    front_pts = pts[tilt_mask]
+
+    # _fit_tilt_projection_frame 已缓存相同 U/Z 范围内的点及其 U/V 坐标。
+    # 保留兼容分支，便于旧测试或外部调试代码传入未带缓存的 frame。
+    base_pts = frame.get('tilt_base_pts')
+    base_u = frame.get('tilt_base_u')
+    base_v = frame.get('tilt_base_v')
+    if base_pts is None or base_u is None or base_v is None:
+        relative_xy = pts[:, :2] - frame['origin_xy']
+        u_values = relative_xy @ frame['u_axis']
+        v_values = relative_xy @ frame['v_axis']
+        base_mask = (
+            (u_values >= u_min) & (u_values < u_max) &
+            (pts[:, 2] >= z_min) & (pts[:, 2] < z_max)
+        )
+        base_pts = pts[base_mask]
+        base_u = u_values[base_mask]
+        base_v = v_values[base_mask]
+
+    depth_mask = (base_v >= v_back) & (base_v <= v_front)
+    front_pts = base_pts[depth_mask]
     if len(front_pts) < 100:
         return None
 
     nx = int(math.ceil((u_max - u_min) / TILT_GRID_M))
     nz = int(math.ceil((z_max - z_min) / TILT_GRID_M))
     image = np.zeros((nz, nx), dtype=np.uint8)
-    front_u = u_values[tilt_mask]
+    front_u = base_u[depth_mask]
     ix = np.clip(
         ((front_u - u_min) / TILT_GRID_M).astype(int),
         0, nx - 1)
@@ -1711,18 +1735,45 @@ def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0,
 
 
 def _default_save_dir():
-    # 优先用 COLCON_PREFIX_PATH（/ws/install）推断 ws 根
-    prefix = os.environ.get('COLCON_PREFIX_PATH', '')
-    if prefix:
-        ws_root = os.path.dirname(prefix.split(':')[0])
-        if os.path.isdir(ws_root):
+    """定位当前 robot_process 所属工作空间的点云日志目录。
+
+    不能取 COLCON_PREFIX_PATH 的第一项：叠加加载多个工作空间时，第一项可能是
+    另一个 overlay，导致点云保存到错误的 ws。优先级为：
+      1. ROBOT_PROCESS_PCD_DIR 显式配置；
+      2. 当前 Python 文件实际指向的源码工作空间（兼容 --symlink-install）；
+      3. ament 索引中 robot_process 自身的安装前缀；
+      4. 当前模块旁的 pcd_logs 兜底目录。
+    """
+    configured = os.environ.get('ROBOT_PROCESS_PCD_DIR', '').strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+
+    module_path = os.path.realpath(__file__)
+    parts = module_path.split(os.sep)
+    # 源码布局：<ws>/src/robot_process/robot_process/stacking_detection/...
+    for index in range(len(parts) - 1):
+        if parts[index] == 'src' and parts[index + 1] == 'robot_process':
+            ws_root = os.sep.join(parts[:index]) or os.sep
             return os.path.join(ws_root, 'log', 'robot_process', 'pcd_logs')
-    # 从源码路径找 src/ 目录，定位 ws 根（.../ws/src/pkg/pkg/stacking_detection/）
-    parts = os.path.abspath(__file__).split(os.sep)
-    if 'src' in parts:
-        ws_root = os.sep.join(parts[:parts.index('src')])
-        return os.path.join(ws_root, 'log', 'robot_process', 'pcd_logs')
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pcd_logs')
+
+    # 普通 colcon 安装布局：<ws>/install/robot_process。通过包自身前缀定位，
+    # 不受其他已 source 工作空间在环境变量中的排列顺序影响。
+    try:
+        from ament_index_python.packages import get_package_prefix
+        package_prefix = os.path.realpath(get_package_prefix('robot_process'))
+        prefix_parts = package_prefix.split(os.sep)
+        install_indices = [
+            index for index, name in enumerate(prefix_parts)
+            if name == 'install'
+        ]
+        if install_indices:
+            install_index = install_indices[-1]
+            ws_root = os.sep.join(prefix_parts[:install_index]) or os.sep
+            return os.path.join(ws_root, 'log', 'robot_process', 'pcd_logs')
+    except Exception as exc:
+        _dbg(f"无法从ament索引定位robot_process工作空间，使用模块目录兜底：{exc}")
+
+    return os.path.join(os.path.dirname(module_path), 'pcd_logs')
 
 _DEFAULT_SAVE_DIR = _default_save_dir()
 
@@ -1752,7 +1803,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260721/merged_20260721_114209.pcd'
+    _FILENAME = 'merged_20260721/merged_20260721_102848.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -1781,7 +1832,7 @@ if __name__ == '__main__':
     # 细支箱离线回放使用与 robot_process_node 相同的补偿角：-56.6 - (-60.5) = +3.9°。
     measured = _compute_width(pcd, empty, yaw_offset_deg=3.9,
                               rel_top_h=0.3*1, box_h=0.3,
-                              expected_width_mm=1100, box_width_mm=550)  # view 跟随顶部 VIEW 开关
+                              expected_width_mm=1100, box_width_mm=275)  # view 跟随顶部 VIEW 开关
     if measured is None:
         print('\n检测状态: status=2（倾斜异常或宽度计算失败）')
     else:
