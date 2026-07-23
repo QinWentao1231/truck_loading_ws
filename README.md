@@ -251,12 +251,16 @@ ros2 run hesai_ros_driver hesai_ros_driver_node
 | `off_line_mode` | `false` 时通过 gRPC 接收垛型，`true` 时读取本地 PKL |
 | `use_corner` | 是否启用角点检测补偿 |
 | `chk_enable` | 是否启用垛面检测流程 |
-| `show_env` | 是否显示路径规划环境 |
+| `show_env` | 是否为每一抓生成路径规划 HTML 可视化 |
 | `resume_save` | 是否保存断点进度 |
 | `resume_on_restart` | 重启后是否自动检查并恢复进度 |
 | `resume_need_confirm` | 断点恢复前是否等待人工确认 |
 
 在线模式下，程序在 `5007` 端口接收规划器 gRPC 垛型数据，并在配置的 TCP 端口等待机器人连接。离线模式从 `src/robot_process/robot_process/pkl_data/` 读取垛型文件。
+
+执行 `cmd_chk_path` 时，即使 `show_env=false`，混装 Block 也会为每一抓保存一份
+HTML 路径可视化；每面完成后仍会保存整面 PNG。检查结束后，完整汇总会同时
+写入 TXT、JSON，并打印到终端和运行日志中。
 
 垛面检测点云默认保存到当前 `robot_process` 功能包所属工作空间的
 `log/robot_process/pcd_logs/`。程序通过包自身路径定位工作空间，不使用其他 overlay

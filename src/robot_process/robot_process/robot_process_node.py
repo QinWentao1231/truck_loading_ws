@@ -205,6 +205,7 @@ def _write_chk_path_summary(session):
         'total_grabs': len(results),
         'normal_grabs': len(results) - len(abnormal),
         'abnormal_grabs': len(abnormal),
+        'path_htmls': session.get('path_htmls', []),
         'face_images': session.get('face_images', []),
         'system_issues': session.get('system_issues', []),
         'results': results,
@@ -234,8 +235,9 @@ def _write_chk_path_summary(session):
                 + '；'.join(item['issues']))
     else:
         lines.append('检查结果: 未发现异常')
-    if summary['face_images']:
+    if summary['path_htmls'] or summary['face_images']:
         lines.append('可视化文件:')
+        lines.extend(f'  {path}' for path in summary['path_htmls'])
         lines.extend(f'  {path}' for path in summary['face_images'])
     if summary['system_issues']:
         lines.append('非路径异常:')
@@ -244,7 +246,28 @@ def _write_chk_path_summary(session):
         file.write('\n'.join(lines) + '\n')
     summary['json_path'] = json_path
     summary['txt_path'] = txt_path
+    summary['report_lines'] = lines
     return summary
+
+
+def _log_chk_path_summary(summary, logger):
+    """把TXT汇总的同一份内容输出到终端/运行日志。"""
+    logger.info('========== cmd_chk_path 检查汇总 ==========')
+    warning_section = False
+    for line in summary.get('report_lines', []):
+        if line in ('异常定位:', '非路径异常:'):
+            warning_section = True
+            logger.warning(line)
+            continue
+        if line == '可视化文件:':
+            warning_section = False
+        if warning_section:
+            logger.warning(line)
+        else:
+            logger.info(line)
+    logger.info(f'汇总TXT: {summary["txt_path"]}')
+    logger.info(f'汇总JSON: {summary["json_path"]}')
+    logger.info('===========================================')
 
 
 def _parse_stack_group(src, stack_attr='Stack', group_attr='Group'):
@@ -747,6 +770,7 @@ def main():
                         'stamp': _chk_stamp,
                         'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
                         'results': [],
+                        'path_htmls': [],
                         'face_images': [],
                         'system_issues': [],
                     }
@@ -756,9 +780,8 @@ def main():
                     if chk_value <= 0:
                         try:
                             _empty_summary = _write_chk_path_summary(chk_session)
-                            logs.info(
-                                "cmd_chk_path 当前无待检查路径，汇总文件: "
-                                f"{_empty_summary['txt_path']}")
+                            logs.info("cmd_chk_path 当前无待检查路径")
+                            _log_chk_path_summary(_empty_summary, logs)
                         except Exception as _empty_summary_error:
                             logs.warning(
                                 f"cmd_chk_path 空任务汇总保存失败: {_empty_summary_error}")
@@ -1225,8 +1248,13 @@ def main():
                 )
                 server.send_message(_build_msg(len(path) + 1, path_payload + info_block + b'\x00\x00'))
     
-                #可视化
-                if show_env:
+                # 正常任务由 show_env 控制单抓 HTML；cmd_chk_path 检查混装面时
+                # 即使 show_env=false 也必须逐抓保存，便于定位混装路径异常。
+                _save_path_html = (
+                    show_env
+                    or (chk_session is not None and rp.block_type == 'mixture')
+                )
+                if _save_path_html:
                     try:
                         ts = time.strftime("%Y%m%d_%H%M%S")
                         plot = Plot(
@@ -1245,6 +1273,9 @@ def main():
                         plot.plot_start(_X3, x0)
                         plot.plot_goal(_X3, x_goal)
                         plot.draw(auto_open=False)
+                        if chk_session is not None:
+                            chk_session['path_htmls'].append(plot.filename)
+                        logs.info(f"单抓路径可视化已保存: {plot.filename}")
                     except Exception as _path_plot_error:
                         _plot_issue = f"单抓路径可视化保存失败: {_path_plot_error}"
                         if chk_session is not None:
@@ -1325,23 +1356,7 @@ def main():
                     if chk_value == 0 and chk_session is not None:
                         try:
                             _chk_summary = _write_chk_path_summary(chk_session)
-                            if _chk_summary['abnormal_grabs']:
-                                logs.warning(
-                                    "cmd_chk_path 批量检查完成："
-                                    f"总抓数={_chk_summary['total_grabs']}，"
-                                    f"异常抓数={_chk_summary['abnormal_grabs']}")
-                                for _item in _chk_summary['results']:
-                                    if _item['issues']:
-                                        logs.warning(
-                                            f"[CHK-SUMMARY] Block {_item['block']} / "
-                                            f"面 {_item['face']} / 第 {_item['grab']} 抓: "
-                                            + '；'.join(_item['issues']))
-                            else:
-                                logs.info(
-                                    "cmd_chk_path 批量检查完成："
-                                    f"共 {_chk_summary['total_grabs']} 抓，未发现异常")
-                            logs.info(
-                                f"cmd_chk_path 汇总文件: {_chk_summary['txt_path']}")
+                            _log_chk_path_summary(_chk_summary, logs)
                         except Exception as _chk_summary_error:
                             logs.warning(
                                 f"cmd_chk_path 汇总保存失败，仅保留运行日志: "
