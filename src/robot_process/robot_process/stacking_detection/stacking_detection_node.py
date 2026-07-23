@@ -101,6 +101,7 @@ PAIR_OCCUPANCY_BIN_M = 0.10          # 沿宽度方向每100mm统计一个占用
 PAIR_OCCUPANCY_MIN_PTS_PER_BIN = 10 # bin 内至少此点数才认为有箱体表面
 PAIR_OCCUPANCY_MIN_COVERAGE = 0.60  # 覆盖率达到60%视为区间内有箱；未达到则是下一抓候选空缺口
 PAIR_OCCUPANCY_MIN_REL_DENSITY = 0.25 # 密度低于本帧最完整箱体区25%时，即使有后方漏点也仍视为空缺口
+PAIR_WIDTH_TOLERANCE_BOXES = 1.5     # 候选面允许间距 = 理论宽度 ± 1.5个单箱宽度
 
 # ── 当前面 Y 锁定（深度方向，只保留最靠雷达的当前面箱，滤掉后排箱）──
 FRONT_Y_BIN = 0.05               # Y 直方图 bin 宽(米)
@@ -127,9 +128,9 @@ TILT_LINE_ANGLE_MIN_DEG = 12.0   # 排除接近水平的正常箱边
 TILT_LINE_ANGLE_MAX_DEG = 78.0   # 排除接近竖直的正常箱边
 TILT_RESULT_MIN_DEG = 15.0       # 两边综合倾角下限；过滤正常箱体边缘的小波动
 TILT_EACH_LINE_MIN_DEG = 15.0    # 水平边和竖直边都必须明显偏转，避免一条正常边搭配噪声线误报
-TILT_PAIR_ANGLE_MIN_DEG = 75.0   # 两条箱边应近似正交
-TILT_PAIR_ANGLE_MAX_DEG = 105.0
-TILT_PAIR_ENDPOINT_MAX_M = 0.08  # 两条斜边连接端点最大距离：80mm
+TILT_PAIR_ANGLE_MIN_DEG = 85.0   # 两条箱边必须接近正交；收紧范围避免不同箱边误配
+TILT_PAIR_ANGLE_MAX_DEG = 95.0
+TILT_PAIR_ENDPOINT_MAX_M = 0.04  # 相邻箱边应在同一角点相接，端点最大距离40mm
 TILT_HOUGH_THRESHOLD = 20
 TILT_HOUGH_MAX_GAP_M = 0.06      # 雷达扫描线存在空隙，允许直线跨越60mm断点
 TILT_LINE_RADIUS_M = 0.008       # 可视化斜线圆柱半径
@@ -1006,7 +1007,7 @@ def _build_tilt_2d_image(binary_image, edge_image, result, z_min, z_max):
             canvas, label, (label_x, label_y),
             cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
 
-    title = (f"STATUS=2 | Tilted box: {result['tilt_deg']:.1f} deg | "
+    title = (f"TILT CANDIDATE | Tilted box: {result['tilt_deg']:.1f} deg | "
              f"auto yaw: {result['projection_yaw_deg']:+.1f} deg | "
              f"V depth: {result['front_depth_m'] * 1000:.0f} mm")
     cv2.putText(
@@ -1125,7 +1126,7 @@ def _show_tilt_result(tilt_roi, front_pts, result):
         if label is not None:
             geometries.append(label)
     title = (
-        f"STATUS=2 | 箱体倾斜 {result['tilt_deg']:.1f}deg | "
+        f"TILT CANDIDATE | 箱体倾斜 {result['tilt_deg']:.1f}deg | "
         f"自估yaw={result['projection_yaw_deg']:+.1f}deg | "
         + " | ".join(descriptions))
     _show_geometries(title, geometries, width=1100, height=760)
@@ -1287,6 +1288,7 @@ def _detect_tilted_box(pts, actual_top_z, box_h, view=False):
             **item,
             'p0_uz': p0_uz,
             'p1_uz': p1_uz,
+            'line_v': float(line_v),
             'p0_xyz': to_xyz(p0_uz),
             'p1_xyz': to_xyz(p1_uz),
         })
@@ -1305,11 +1307,78 @@ def _detect_tilted_box(pts, actual_top_z, box_h, view=False):
         'front_depth_m': detected['front_depth_m'],
         'projection_yaw_deg': frame['yaw_deg'],
         'u_range': frame['u_range'],
+        'origin_xy': frame['origin_xy'],
+        'u_axis': frame['u_axis'],
         'v_axis': frame['v_axis'],
     }
     if view:
         _show_tilt_result(frame['roi'], front_pts, result)
     return result
+
+
+def _build_tilt_outer_candidate(tilt_result, yaw_offset_deg=0.0):
+    """把倾斜箱侧边沿局部 U 方向平移到箱体最外侧，生成竖直虚拟候选面。
+
+    倾斜箱的侧边不再满足后续 ``±X`` 法向过滤，容易从候选面中消失。这里选取
+    两条检出边中更接近竖直方向的一条作为侧边，再根据倾斜轮廓位于垛面中心的
+    左侧或右侧，把它压到整个轮廓的最外侧 U。最后执行与测宽点云相同的 J1
+    偏航补偿，使虚拟面的 x 坐标能直接参与现有候选面配对。
+    """
+    lines = tilt_result.get('lines') or []
+    if len(lines) < 2:
+        return None
+
+    origin_xy = np.asarray(tilt_result.get('origin_xy'), dtype=float)
+    u_axis = np.asarray(tilt_result.get('u_axis'), dtype=float)
+    v_axis = np.asarray(tilt_result.get('v_axis'), dtype=float)
+    if (origin_xy.shape != (2,) or u_axis.shape != (2,) or
+            v_axis.shape != (2,) or not np.isfinite(
+                np.concatenate((origin_xy, u_axis, v_axis))).all()):
+        return None
+
+    all_u = np.asarray([
+        float(point[0])
+        for line in lines
+        for point in (line['p0_uz'], line['p1_uz'])
+    ])
+    u_center = float(np.mean(tilt_result['u_range']))
+    outline_center_u = float(np.mean(all_u))
+    if outline_center_u < u_center:
+        side_name = '左外侧'
+        outer_u = float(np.min(all_u))
+    else:
+        side_name = '右外侧'
+        outer_u = float(np.max(all_u))
+
+    # 与竖直方向夹角最小的线作为倾斜侧边；平移后保留它原有的高度跨度。
+    side_line = max(lines, key=lambda line: abs(float(line['angle_deg'])))
+    line_v = float(side_line['line_v'])
+    outer_xy = origin_xy + outer_u * u_axis + line_v * v_axis
+    z0 = float(side_line['p0_uz'][1])
+    z1 = float(side_line['p1_uz'][1])
+    sample_count = max(
+        MIN_CLUSTER_PTS,
+        int(math.ceil(abs(z1 - z0) / max(TILT_GRID_M, 1e-6))) + 1)
+    virtual_pts = np.column_stack((
+        np.full(sample_count, outer_xy[0]),
+        np.full(sample_count, outer_xy[1]),
+        np.linspace(z0, z1, sample_count),
+    ))
+
+    if yaw_offset_deg and J1_AXIS_XY is not None:
+        virtual_pts = _derotate_about_j1(
+            virtual_pts, J1_DEROTATE_SIGN * yaw_offset_deg, J1_AXIS_XY)
+    x_face = float(np.median(virtual_pts[:, 0]))
+    if not np.isfinite(x_face):
+        return None
+    return {
+        'k': 'tilt_outer',
+        'pts': virtual_pts,
+        'x_face': x_face,
+        'source': 'tilt_outer',
+        'side_name': side_name,
+        'outer_u': outer_u,
+    }
 
 
 def _measure_pair_occupancy(pts, x_left, x_right, y_front):
@@ -1346,7 +1415,7 @@ def _measure_pair_occupancy(pts, x_left, x_right, y_front):
 
 def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                    rel_top_h=None, box_h=None, expected_width_mm=None,
-                   box_width_mm=None, log_callback=None):
+                   box_width_mm=None, log_callback=None, box_type=None):
     """
     合并双雷达点云，测量左右侧面总宽度（mm）。
 
@@ -1357,21 +1426,33 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                     内部自标定地板 + 实测箱顶，把直通滤波 Z 锁定到"当前行"隔离相邻层；
                     否则用全局 PASS_Z。
     expected_width_mm / box_width_mm: 当前抓理论总宽度和单箱宽度；候选面间距必须落在
-                    [理论宽度-单箱宽度, 理论宽度+单箱宽度] 范围内。
-    log_callback: 检测到箱体倾斜时的日志回调；在线模式传主节点 logger.warning。
+                    [理论宽度-1.5×单箱宽度, 理论宽度+1.5×单箱宽度] 范围内。
+    box_type: 当前抓箱型；首位为2表示细支烟箱。细支烟箱第一层计算失败时，
+                    兜底返回理论宽度+一个单箱宽度。
+    log_callback: 检测到箱体倾斜及二次复核结果的日志回调；在线模式传主节点 logger.warning。
 
     策略：
       0. 偏航补偿 + （可选）当前行 Z 锁定
-      1. 原始点云自适应 U-Z 轮廓倾斜检测；命中时返回 None
+      1. 原始点云自适应 U-Z 轮廓倾斜检测；命中后生成最外侧虚拟候选面继续复核
       2. 直通滤波
       3. 法向量滤波保留 ±x 侧面点
       4. DBSCAN 聚类，所有有效候选面两两组合
-      5. 保留间距位于理论宽度 ± 单箱宽度范围内的组合
+      5. 保留间距位于理论宽度 ± 1.5个单箱宽度范围内的组合
       6. 检查两面之间的点云覆盖率/密度，排除已有箱体占用的区间
       7. 在剩余空缺口中取最接近下一抓理论宽度者，宽度 = 右面 x - 左面 x
     """
     if view is None:
         view = VIEW
+
+    slim_first_layer_fallback = (
+        str(box_type)[:1] == '2' and
+        rel_top_h is not None and box_h is not None and
+        np.isfinite(rel_top_h) and np.isfinite(box_h) and
+        box_h > 0 and rel_top_h <= box_h * 1.5 and
+        expected_width_mm is not None and box_width_mm is not None and
+        np.isfinite(expected_width_mm) and np.isfinite(box_width_mm) and
+        expected_width_mm > 0 and box_width_mm > 0
+    )
     
     # 记录开始时间
     total_start_time = time.time()
@@ -1428,23 +1509,66 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     # ── 0d. 箱体倾斜检测：使用独立正视轮廓，不受后续 ±X 侧面法向过滤影响 ──────
     tilt_result = _detect_tilted_box(
         tilt_pts, actual_top_z, box_h, view=view)
+    tilt_message_base = None
+    tilt_candidate = None
     if tilt_result is not None:
         line_text = "；".join(
             f"斜边{index}角度={line['angle_deg']:+.1f}°、长度={line['length_m'] * 1000:.0f}mm"
             for index, line in enumerate(tilt_result['lines'], start=1)
         )
-        message = (
+        tilt_message_base = (
             f"垛面异常：检测到箱体倾斜，估计倾斜角={tilt_result['tilt_deg']:.1f}°；"
             f"自估垛面yaw={tilt_result['projection_yaw_deg']:+.1f}°；"
             f"{line_text}；端点间距={tilt_result['endpoint_gap_m'] * 1000:.0f}mm；"
-            f"局部V窗口={tilt_result['front_depth_m'] * 1000:.0f}mm，返回 status=2")
+            f"局部V窗口={tilt_result['front_depth_m'] * 1000:.0f}mm")
+        tilt_candidate = _build_tilt_outer_candidate(
+            tilt_result, yaw_offset_deg=yaw_offset_deg)
+        if tilt_candidate is not None:
+            _dbg(
+                f"{tilt_message_base}；倾斜面平移到{tilt_candidate['side_name']}，"
+                f"虚拟候选面x={tilt_candidate['x_face']:+.3f}m，继续距离复核")
+        else:
+            _dbg(f"{tilt_message_base}；倾斜外侧候选面生成失败，继续用常规候选面复核")
+
+    def _report_tilt_result(success, detail):
+        if tilt_message_base is None:
+            return
+        message = (
+            f"{tilt_message_base}；倾斜候选面复核"
+            f"{'通过' if success else '失败'}：{detail}，"
+            f"返回 status={'1' if success else '2'}")
         _dbg(message)
         if log_callback is not None:
             try:
                 log_callback(message)
             except Exception as exc:
                 _dbg(f"倾斜异常日志回调失败：{type(exc).__name__}: {exc}")
-        return None
+
+    def _failure_result(detail):
+        """普通失败返回None；细支烟箱第一层按现场策略返回安全兜底宽度。"""
+        if not slim_first_layer_fallback:
+            _report_tilt_result(False, detail)
+            return None
+        fallback_mm = int(round(
+            float(expected_width_mm) + float(box_width_mm)))
+        if tilt_message_base is not None:
+            message = (
+                f"{tilt_message_base}；倾斜候选面复核失败：{detail}；"
+                f"细支烟箱第一层启用测宽兜底，测量值={fallback_mm}mm，"
+                f"返回 status=1")
+        else:
+            message = (
+                f"细支烟箱第一层测宽失败兜底：{detail}；"
+                f"理论宽度={float(expected_width_mm):.0f}mm，"
+                f"单箱宽度={float(box_width_mm):.0f}mm，"
+                f"测量值={fallback_mm}mm，返回 status=1")
+        _dbg(message)
+        if log_callback is not None:
+            try:
+                log_callback(message)
+            except Exception as exc:
+                _dbg(f"细支首层兜底日志回调失败：{type(exc).__name__}: {exc}")
+        return fallback_mm
 
     # 记录预处理阶段耗时
     preprocessing_time = time.time() - start_time
@@ -1461,7 +1585,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     filtered_pts = pts[mask]
     if len(filtered_pts) < PASS_MIN_PTS:
         _dbg("计算失败：直通滤波后点数不足，请检查坐标范围参数")
-        return None
+        return _failure_result(
+            f"直通滤波后点数不足({len(filtered_pts)})")
 
     if view:
         # 原始点云(灰) + 直通框选中部分(绿)，直观看裁剪框相对整体的位置
@@ -1497,7 +1622,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     side_pts = pts[nx > np.cos(np.radians(NORMAL_ANGLE_DEG))]
     if len(side_pts) < DBSCAN_MIN_POINTS:
         _dbg(f"计算失败：法向滤波后侧面点不足({len(side_pts)})，无法聚类")
-        return None
+        return _failure_result(
+            f"法向滤波后侧面点不足({len(side_pts)})")
 
     if view:
         bg0 = o3d.geometry.PointCloud()
@@ -1574,20 +1700,35 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             'k': k,
             'pts': kpts,
             'x_face': x_face,
+            'source': 'normal_cluster',
         })
+
+    # 倾斜侧面通常会被 ±X 法向过滤丢掉。把压到轮廓最外侧的竖直虚拟面加入
+    # 同一个候选列表，后续仍沿用理论宽度范围和区间占用检查，不单独放宽阈值。
+    if tilt_candidate is not None:
+        candidates.append(tilt_candidate)
+        _dbg(
+            f"加入倾斜外侧候选面：k={tilt_candidate['k']} "
+            f"x={tilt_candidate['x_face']:+.3f}m "
+            f"点数={len(tilt_candidate['pts'])}")
 
     if len(candidates) < 2:
         _dbg(f"计算失败：有效候选面不足2个（当前{len(candidates)}个）")
-        return None
+        return _failure_result(
+            f"有效候选面不足2个（当前{len(candidates)}个）")
 
     if (expected_width_mm is None or box_width_mm is None or
             not np.isfinite(expected_width_mm) or not np.isfinite(box_width_mm) or
             expected_width_mm <= 0 or box_width_mm <= 0):
         _dbg(f"计算失败：理论宽度或单箱宽度无效（理论={expected_width_mm}, 单箱={box_width_mm}）")
-        return None
+        return _failure_result(
+            f"理论宽度或单箱宽度无效（理论={expected_width_mm}, 单箱={box_width_mm}）")
 
-    min_gap_mm = max(0.0, float(expected_width_mm) - float(box_width_mm))
-    max_gap_mm = float(expected_width_mm) + float(box_width_mm)
+    gap_tolerance_mm = (
+        float(box_width_mm) * PAIR_WIDTH_TOLERANCE_BOXES)
+    min_gap_mm = max(
+        0.0, float(expected_width_mm) - gap_tolerance_mm)
+    max_gap_mm = float(expected_width_mm) + gap_tolerance_mm
     candidates.sort(key=lambda item: item['x_face'])
     valid_pairs = []
     for left_index, left in enumerate(candidates):
@@ -1649,7 +1790,9 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             f"计算失败：{len(candidates)}个候选面中无“间距合理且两面之间为空”的缺口，"
             f"允许间距=[{min_gap_mm:.0f}, {max_gap_mm:.0f}]mm，"
             f"空缺口覆盖率阈值=<{PAIR_OCCUPANCY_MIN_COVERAGE*100:.0f}%")
-        return None
+        return _failure_result(
+            f"{len(candidates)}个候选面中未找到允许范围"
+            f"[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm内的空缺口")
 
     (_, left, right, gap_float, z_diff,
      selected_coverage, selected_density) = min(
@@ -1667,9 +1810,19 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
         f"密度={selected_density:.0f}点/m")
 
     clusters = {
-        'left':  side_pts[labels == left_k],
-        'right': side_pts[labels == right_k],
+        'left': lc,
+        'right': rc,
     }
+
+    if tilt_result is not None:
+        tilt_used = (
+            left.get('source') == 'tilt_outer' or
+            right.get('source') == 'tilt_outer')
+        _report_tilt_result(
+            True,
+            f"找到有效候选间距={gap_mm}mm"
+            f"（允许[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm，"
+            f"倾斜外侧候选{'已参与' if tilt_used else '未参与最终组合'}）")
 
     # 记录簇选择耗时
     selection_time = time.time() - start_time
@@ -1719,19 +1872,23 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
 
 def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0,
                    rel_top_h=None, box_h=None, box_width_mm=None,
-                   log_callback=None, view=False):
+                   log_callback=None, view=False, box_type=None):
     """测量堆叠宽度，返回 measured_mm（计算成功）或 None（计算失败/报错）。
     length 为当前抓理论总宽度；box_width_mm 为当前姿态下单箱宽度。
-    两候选面间距只有落在 length ± box_width_mm 范围内才算有效；tolerance 保留兼容旧调用。
+    两候选面间距只有落在 length ± 1.5×box_width_mm 范围内才算有效；
+    tolerance 保留兼容旧调用。
     yaw_offset_deg: 拍照位相对正对的偏航角(度)，用于点云偏航补偿。
     rel_top_h / box_h: 当前抓顶面距地板高度和箱子竖向高度(米)，用于把测宽锁定到当前行。
-    log_callback: 倾斜检出日志回调；倾斜按计算失败返回 None，由主节点发送 status=2。
+    log_callback: 倾斜检出及二次复核日志回调。倾斜外侧候选能组成有效空缺口时
+                  正常返回 measured_mm，否则返回 None，由主节点发送 status=2。
+    box_type: 当前抓箱型。2xx细支烟箱第一层计算失败时返回
+              length + box_width_mm，由主节点发送status=1。
     view: 在线默认 False，避免2D/3D交互窗口阻塞机器人状态返回；离线可显式开启。
     """
     return _compute_width(pc1, pc2, view=view, yaw_offset_deg=yaw_offset_deg,
                           rel_top_h=rel_top_h, box_h=box_h,
                           expected_width_mm=length, box_width_mm=box_width_mm,
-                          log_callback=log_callback)
+                          log_callback=log_callback, box_type=box_type)
 
 
 def _default_save_dir():
@@ -1803,7 +1960,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260721/merged_20260721_102848.pcd'
+    _FILENAME = '0723/merged_20260723_143100.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -1831,8 +1988,9 @@ if __name__ == '__main__':
     # 不需要锁定时把这两个参数删掉即可
     # 细支箱离线回放使用与 robot_process_node 相同的补偿角：-56.6 - (-60.5) = +3.9°。
     measured = _compute_width(pcd, empty, yaw_offset_deg=3.9,
-                              rel_top_h=0.3*1, box_h=0.3,
-                              expected_width_mm=1100, box_width_mm=275)  # view 跟随顶部 VIEW 开关
+                              rel_top_h=0.292*1, box_h=0.292,
+                              expected_width_mm=1100, box_width_mm=285,
+                              box_type='201')  # view 跟随顶部 VIEW 开关
     if measured is None:
         print('\n检测状态: status=2（倾斜异常或宽度计算失败）')
     else:

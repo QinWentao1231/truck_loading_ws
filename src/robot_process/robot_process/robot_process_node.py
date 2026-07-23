@@ -718,7 +718,7 @@ def _fast_forward(rp_list, be, cursor):
 def main():
     global glob_data
     # 日志配置
-    logs.info("***垛序及机器人路径规划程序启动 ver.0.5.5-alpha-for济南烟厂***")
+    logs.info("***垛序及机器人路径规划程序启动 ver.0.5.6（支持混码）-alpha-for济南烟厂***")
     try:
         try:
             from ament_index_python.packages import get_package_share_directory
@@ -1539,7 +1539,8 @@ def main():
                         measured = check_stacking(_grab_width, pc1, pc2, yaw_offset_deg=_yaw_off,
                                                   rel_top_h=_rel_top_h, box_h=_box_h_m,
                                                   box_width_mm=_single_box_width,
-                                                  log_callback=logs.warning, view=False)
+                                                  log_callback=logs.warning, view=False,
+                                                  box_type=_box_type)
                         t_compute = time.time() - _t1
                         if measured is None:
                             # 宽度计算失败：发送 status=2（不再依赖异常兜底）
