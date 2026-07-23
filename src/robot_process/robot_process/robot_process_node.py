@@ -165,6 +165,36 @@ def _candidate_goal(action, rp, config_be, dis_y, direction):
     return tuple(action['pos'])
 
 
+def _check_path_height(path, carried_size, car_height, tolerance=0.5):
+    """检查各路径点处整抓包围盒顶部是否超过车厢物理高度。"""
+    issues = []
+    carried_height = float(carried_size[2])
+    car_height = float(car_height)
+    for point_index, point in enumerate(path):
+        point_z = float(point[2])
+        top_z = point_z + carried_height
+        if top_z <= car_height + tolerance:
+            continue
+        if point_index == 0:
+            label = 'x0'
+        elif point_index == 1:
+            label = 'x1'
+        elif point_index == 2:
+            label = 'APP'
+        else:
+            label = f'goal{point_index - 2}'
+        issues.append({
+            'index': point_index,
+            'label': label,
+            'point_z': point_z,
+            'carried_height': carried_height,
+            'top_z': top_z,
+            'car_height': car_height,
+            'over_height': top_z - car_height,
+        })
+    return issues
+
+
 def _save_face_visualizations(rp, block_number, face_number, stamp,
                               issue_ids=None, save_face=True,
                               save_mixture=False):
@@ -195,6 +225,77 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
     return paths
 
 
+def _save_parsed_order(config_rp, rp_list, source='online'):
+    """垛序构造成功后保存规范化订单字段；仅接收阶段不调用。"""
+    now_text = time.strftime('%Y-%m-%d %H:%M:%S')
+    day_text = time.strftime('%Y%m%d')
+    stamp = (
+        time.strftime('%Y%m%d_%H%M%S')
+        + f'_{time.time_ns() % 1_000_000_000:09d}'
+    )
+    output_dir = os.path.join(resolve_output_dir(day_text), 'orders')
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f'parsed_order_{stamp}.json')
+    normalized_blocks = (
+        config_rp if isinstance(config_rp, list) else [config_rp]
+    )
+    block_summaries = []
+    for block_index, rp_item in enumerate(rp_list, start=1):
+        actions = [item for item in rp_item.ori_offsets if item != 'done']
+        block_summaries.append({
+            'block': block_index,
+            'block_type': rp_item.block_type,
+            'box_types': list(rp_item.box_configs.keys()),
+            'box_count': int(rp_item.box_count),
+            'grab_count': len(actions),
+            'face_count': max(
+                (int(item['num_F']) for item in actions), default=0),
+        })
+    record = {
+        'schema_version': 1,
+        'parsed_at': now_text,
+        'source': source,
+        'block_count': len(rp_list),
+        'total_box_count': sum(item['box_count'] for item in block_summaries),
+        'total_grab_count': sum(item['grab_count'] for item in block_summaries),
+        'mixture_block_position': _find_mixture_block_position(rp_list),
+        'block_summaries': block_summaries,
+        'order_fields': normalized_blocks,
+    }
+    with open(output_path, 'w', encoding='utf-8') as file:
+        json.dump(record, file, ensure_ascii=False, indent=2)
+    return output_path
+
+
+def _collect_mixture_fields(config_rp):
+    """将内部规范化结构还原为接口收到的扁平 mixture 字段。"""
+    blocks = config_rp if isinstance(config_rp, list) else [config_rp]
+    result = []
+    for block_index, block in enumerate(blocks, start=1):
+        mixture_items = []
+        for face in block.get('mixture', []) or []:
+            items = _json_mixture_items(face)
+            if items is None:
+                continue
+            for item in items:
+                pos = _json_value(item, 'Pos', {}) or {}
+                mixture_items.append({
+                    'Type': _json_value(item, 'Type', ''),
+                    'Num': _json_value(item, 'Num', 0),
+                    'Pos': {
+                        'X': _json_value(pos, 'X', 0.0),
+                        'Y': _json_value(pos, 'Y', 0.0),
+                        'Z': _json_value(pos, 'Z', 0.0),
+                    },
+                })
+        if mixture_items:
+            result.append({
+                'block': block_index,
+                'mixture': mixture_items,
+            })
+    return result
+
+
 def _write_chk_path_summary(session):
     """将 cmd_chk_path 批量检查结果写入 TXT/JSON，并返回统计信息。"""
     results = session['results']
@@ -208,6 +309,7 @@ def _write_chk_path_summary(session):
         'path_htmls': session.get('path_htmls', []),
         'face_images': session.get('face_images', []),
         'system_issues': session.get('system_issues', []),
+        'mixture_fields': session.get('mixture_fields', []),
         'results': results,
     }
     output_dir = resolve_output_dir(session['stamp'][:8])
@@ -235,6 +337,10 @@ def _write_chk_path_summary(session):
                 + '；'.join(item['issues']))
     else:
         lines.append('检查结果: 未发现异常')
+    if summary['mixture_fields']:
+        lines.append('收到的mixture字段:')
+        lines.extend(json.dumps(
+            summary['mixture_fields'], ensure_ascii=False, indent=2).splitlines())
     if summary['path_htmls'] or summary['face_images']:
         lines.append('可视化文件:')
         lines.extend(f'  {path}' for path in summary['path_htmls'])
@@ -259,7 +365,7 @@ def _log_chk_path_summary(summary, logger):
             warning_section = True
             logger.warning(line)
             continue
-        if line == '可视化文件:':
+        if line in ('收到的mixture字段:', '可视化文件:'):
             warning_section = False
         if warning_section:
             logger.warning(line)
@@ -656,10 +762,12 @@ def main():
         resume_cursor = None
         if resume_data:
             config_rp, resume_cursor = resume_data
+            order_source = 'resume'
             logs.warning("检测到未完成码垛进度，进入断点续传（跳过等待垛型）")
         # 选择读取垛型参数的方式
         elif off_line_mode:
             try:
+                order_source = 'offline'
                 # 离线读取文件模式
                 logs.warning("已启用离线模式，垛型参数文件夹为 {}".format(os.getcwd() + '/pkl_data/'))
                 time.sleep(1)
@@ -672,6 +780,7 @@ def main():
                 sys.exit(1)
         else:
             # 在线读取垛型模式
+            order_source = 'online'
             glob_data = None
             if 'svr' not in vars():
                 svr = GrpcServer(5007, callback)
@@ -710,6 +819,14 @@ def main():
         except Exception as e:
             logs.error(f"垛序计算失败，请检查垛型数据: {e}")
             sys.exit(1)
+        # 只有所有 Block 均成功构造 RobotPosition 后才保存；gRPC 仅接收时不落盘。
+        try:
+            parsed_order_path = _save_parsed_order(
+                config_rp, rp_list, source=order_source)
+            logs.info(f"订单解析字段已保存: {parsed_order_path}")
+        except Exception as order_save_error:
+            # 订单归档属于诊断信息，保存失败不能影响机器人主流程。
+            logs.warning(f"订单解析字段保存失败，继续执行: {order_save_error}")
         # 断点续传：首次收到垛型时落盘保存计划（续传时计划已在磁盘，跳过）
         if store and not off_line_mode and resume_save and resume_cursor is None:
             store.save_plan(config_rp)
@@ -773,6 +890,7 @@ def main():
                         'path_htmls': [],
                         'face_images': [],
                         'system_issues': [],
+                        'mixture_fields': _collect_mixture_fields(config_rp),
                     }
                     logs.info(
                         f"cmd_chk_path 批量检查开始，当前 Block {rp_idx + 1}，"
@@ -1124,6 +1242,18 @@ def main():
                               + (f"  extra_goals({len(extra_goals)}段): " +
                                  ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
                                  if extra_goals else ""))
+                    # 规划器只保证箱体垛型在车厢内；路径抬高和手爪高度包围盒
+                    # 由本节点叠加。最终 path（含运动学调整后的 APP）必须重新查顶。
+                    for height_issue in _check_path_height(path, size, rp.H):
+                        issue_text = (
+                            f"路径{height_issue['label']}顶部超出车厢: "
+                            f"点Z={height_issue['point_z']:.1f}mm + "
+                            f"整抓高度={height_issue['carried_height']:.1f}mm = "
+                            f"{height_issue['top_z']:.1f}mm，"
+                            f"车厢高度={height_issue['car_height']:.1f}mm，"
+                            f"超出={height_issue['over_height']:.1f}mm")
+                        path_issues.append(issue_text)
+                        logs.warning(f"[CHK-HEIGHT] Round.{action['id']} {issue_text}")
                     if obstacles:
                         X_chk = SearchSpace(np.array([(0, rp.L), (0, rp.W), (0, rp.H)]), obstacles)
                         # 只检查过渡/接近点（x0,x1,x_app），落箱点本身不做障碍检测
@@ -1216,7 +1346,7 @@ def main():
                 logs.debug("it cost {:.2f} s".format(end_time - start_time))
 
                 if chk_session is not None:
-                    chk_session['results'].append({
+                    chk_result = {
                         'block': rp_idx + 1,
                         'block_type': rp.block_type,
                         'face': int(action['num_F']),
@@ -1228,7 +1358,8 @@ def main():
                         'goal': [round(float(value), 2) for value in x_goal],
                         'cost_sec': round(end_time - start_time, 4),
                         'issues': list(dict.fromkeys(path_issues)),
-                    })
+                    }
+                    chk_session['results'].append(chk_result)
 
                 # 发送路径数据：每个路径点编码为41字节块
                 # 中间点 flag = 区域码，末点 flag = 动作码

@@ -250,8 +250,9 @@ ros2 run hesai_ros_driver hesai_ros_driver_node
 | `ip`、`port` | 机器人 TCP 服务监听地址和端口，当前默认端口为 `8001` |
 | `off_line_mode` | `false` 时通过 gRPC 接收垛型，`true` 时读取本地 PKL |
 | `use_corner` | 是否启用角点检测补偿 |
-| `chk_enable` | 是否启用垛面检测流程 |
+| `chk_enable` | 是否启用路径干涉、左右余量及车厢顶部检查 |
 | `show_env` | 是否为每一抓生成路径规划 HTML 可视化 |
+| `reserve_grip` | 手爪碰撞包围盒余量；当前路径高度使用第3项，以 `config.json` 当前值为准 |
 | `resume_save` | 是否保存断点进度 |
 | `resume_on_restart` | 重启后是否自动检查并恢复进度 |
 | `resume_need_confirm` | 断点恢复前是否等待人工确认 |
@@ -260,7 +261,12 @@ ros2 run hesai_ros_driver hesai_ros_driver_node
 
 执行 `cmd_chk_path` 时，即使 `show_env=false`，混装 Block 也会为每一抓保存一份
 HTML 路径可视化；每面完成后仍会保存整面 PNG。检查结束后，完整汇总会同时
-写入 TXT、JSON，并打印到终端和运行日志中。
+写入 TXT、JSON，并打印到终端和运行日志中。订单中收到的原生 `mixture`
+字段也会写入检查汇总，不额外展开混装逐抓规划细节。
+
+订单只有在全部 Block 成功构造垛序后才会归档；仅通过 gRPC 接收到订单时不会
+保存。每次成功解析生成一个独立 JSON，目录为
+`log/robot_process/YYYYMMDD/orders/`。
 
 垛面检测点云默认保存到当前 `robot_process` 功能包所属工作空间的
 `log/robot_process/pcd_logs/`。程序通过包自身路径定位工作空间，不使用其他 overlay
