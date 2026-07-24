@@ -95,7 +95,9 @@ MIN_CLUSTER_ZSPAN_M = 0.02       # 簇最小 z 跨度(米)：0.10 过滤顶部�
 MAX_CLUSTER_CZ_M = 1.0           # 簇 z 重心上限(米)：> 此值视为车厢顶部凸起结构(管线/灯)，丢弃
 
 # ── 候选面之间的箱体占用检查 ──
-PAIR_OCCUPANCY_FRONT_DEPTH_M = 0.20  # 只检查当前面靠雷达的200mm，避免后排箱/车壁填充空区
+PAIR_OCCUPANCY_FRONT_NORMAL_ANGLE_DEG = 25  # 箱子正面法向与±Y轴的最大夹角
+PAIR_OCCUPANCY_MIN_FRONT_PTS = 50   # 整帧正面点不足时退回原始点云薄层检查
+PAIR_OCCUPANCY_FRONT_DEPTH_M = 0.20  # 正面点不足时的兜底检查深度
 PAIR_OCCUPANCY_SIDE_MARGIN_M = 0.05  # 两候选面内缩50mm，不把边界侧面自身当作箱体证据
 PAIR_OCCUPANCY_BIN_M = 0.10          # 沿宽度方向每100mm统计一个占用 bin
 PAIR_OCCUPANCY_MIN_PTS_PER_BIN = 10 # bin 内至少此点数才认为有箱体表面
@@ -1381,12 +1383,12 @@ def _build_tilt_outer_candidate(tilt_result, yaw_offset_deg=0.0):
     }
 
 
-def _measure_pair_occupancy(pts, x_left, x_right, y_front):
+def _measure_pair_occupancy(evidence_pts, x_left, x_right):
     """检查两个候选侧面之间是否存在连续的箱体点云。
 
     返回 (coverage, point_density, point_count, bin_count)：coverage 为沿 X
-    方向被箱体点覆盖的 bin 比例。只取当前面靠雷达的薄层，避免
-    空隙后方的旧箱或车壁被误认为当前抓。
+    方向被箱体点覆盖的 bin 比例。evidence_pts 由调用方优先传入法向
+    接近 ±Y 的箱子正面点；正面点不足时才传入靠雷达的原始点云薄层。
     """
     gap = float(x_right - x_left)
     margin = min(PAIR_OCCUPANCY_SIDE_MARGIN_M, gap * 0.1)
@@ -1396,10 +1398,9 @@ def _measure_pair_occupancy(pts, x_left, x_right, y_front):
     if inner_width <= 1e-6:
         return 0.0, 0.0, 0, 0
 
-    occupancy_pts = pts[
-        (pts[:, 0] >= inner_left) & (pts[:, 0] <= inner_right) &
-        (pts[:, 1] >= y_front - PAIR_OCCUPANCY_FRONT_DEPTH_M) &
-        (pts[:, 1] <= y_front)
+    occupancy_pts = evidence_pts[
+        (evidence_pts[:, 0] >= inner_left) &
+        (evidence_pts[:, 0] <= inner_right)
     ]
     bin_count = max(1, int(math.ceil(
         inner_width / PAIR_OCCUPANCY_BIN_M)))
@@ -1618,12 +1619,37 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     _pcd = o3d.geometry.PointCloud()
     _pcd.points = o3d.utility.Vector3dVector(pts)
     _pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=NORMAL_KNN))
-    nx = np.abs(np.asarray(_pcd.normals)[:, 0])
+    normals = np.asarray(_pcd.normals)
+    nx = np.abs(normals[:, 0])
     side_pts = pts[nx > np.cos(np.radians(NORMAL_ANGLE_DEG))]
     if len(side_pts) < DBSCAN_MIN_POINTS:
         _dbg(f"计算失败：法向滤波后侧面点不足({len(side_pts)})，无法聚类")
         return _failure_result(
             f"法向滤波后侧面点不足({len(side_pts)})")
+
+    # 两候选侧面之间是否已有箱子，优先使用法向接近 ±Y 的箱子正面点判断。
+    # 这里复用侧面提取已经算好的法向，不增加一次法向估计。
+    ny = np.abs(normals[:, 1])
+    front_face_pts = pts[
+        ny > np.cos(np.radians(PAIR_OCCUPANCY_FRONT_NORMAL_ANGLE_DEG))]
+    if len(front_face_pts) >= PAIR_OCCUPANCY_MIN_FRONT_PTS:
+        occupancy_evidence_pts = front_face_pts
+        occupancy_mode = "正面法向"
+        _dbg(
+            f"区间占用检查：使用箱子正面点云({len(front_face_pts)}点，"
+            f"法向与±Y夹角≤{PAIR_OCCUPANCY_FRONT_NORMAL_ANGLE_DEG}°)")
+    else:
+        # 极稀疏或反光严重时保留原方案兜底，避免整帧没有正面点便把所有区间判空。
+        y_front = pass_y[1]
+        occupancy_evidence_pts = pts[
+            (pts[:, 1] >= y_front - PAIR_OCCUPANCY_FRONT_DEPTH_M) &
+            (pts[:, 1] <= y_front)
+        ]
+        occupancy_mode = f"原始点云前沿{PAIR_OCCUPANCY_FRONT_DEPTH_M * 1000:.0f}mm兜底"
+        _dbg(
+            f"区间占用检查：箱子正面点不足"
+            f"({len(front_face_pts)}<{PAIR_OCCUPANCY_MIN_FRONT_PTS})，"
+            f"使用{occupancy_mode}({len(occupancy_evidence_pts)}点)")
 
     if view:
         bg0 = o3d.geometry.PointCloud()
@@ -1739,7 +1765,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                           float(right['pts'][:, 2].mean()))
             coverage, occupancy_density, occupancy_count, occupancy_bins = (
                 _measure_pair_occupancy(
-                    pts, left['x_face'], right['x_face'], pass_y[1])
+                    occupancy_evidence_pts,
+                    left['x_face'], right['x_face'])
                 if within_range else (0.0, 0.0, 0, 0)
             )
             coverage_has_box = coverage >= PAIR_OCCUPANCY_MIN_COVERAGE
@@ -1748,7 +1775,7 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 f"k={right['k']}({len(right['pts'])}点,x={right['x_face']:+.3f})  "
                 f"间距={gap_float:.0f}mm 允许=[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm "
                 f"z重心差={z_diff_*1000:.0f}mm "
-                f"内部占用={coverage*100:.0f}%({occupancy_count}点/"
+                f"内部占用[{occupancy_mode}]={coverage*100:.0f}%({occupancy_count}点/"
                 f"{occupancy_bins}bin,密度={occupancy_density:.0f}点/m) "
                 f"{'覆盖较高' if coverage_has_box else '低覆盖'} "
                 f"{'间距满足' if within_range else '间距不满足'}")
@@ -1806,7 +1833,7 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
         f"k={right_k}({len(rc)}点,x={x_right_face:+.3f})  "
         f"宽度={gap_mm}mm 理论={float(expected_width_mm):.0f}mm "
         f"允许=[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm z重心差={z_diff*1000:.0f}mm "
-        f"内部占用={selected_coverage*100:.0f}% "
+        f"内部占用[{occupancy_mode}]={selected_coverage*100:.0f}% "
         f"密度={selected_density:.0f}点/m")
 
     clusters = {
@@ -1960,7 +1987,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = '0723/merged_20260723_143100.pcd'
+    _FILENAME = '0724/merged_20260724_102835.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -1987,10 +2014,10 @@ if __name__ == '__main__':
     # 当前行 Z 锁定调试：rel_top_h=当前行顶面距地板高度(米)，box_h=箱竖向高度(米)
     # 不需要锁定时把这两个参数删掉即可
     # 细支箱离线回放使用与 robot_process_node 相同的补偿角：-56.6 - (-60.5) = +3.9°。
-    measured = _compute_width(pcd, empty, yaw_offset_deg=3.9,
-                              rel_top_h=0.292*1, box_h=0.292,
-                              expected_width_mm=1100, box_width_mm=285,
-                              box_type='201')  # view 跟随顶部 VIEW 开关
+    measured = _compute_width(pcd, empty, yaw_offset_deg=7.4,
+                              rel_top_h=0.585*1, box_h=0.585,
+                              expected_width_mm=980, box_width_mm=245,view=True,
+                              box_type='199')  # view 跟随顶部 VIEW 开关
     if measured is None:
         print('\n检测状态: status=2（倾斜异常或宽度计算失败）')
     else:
