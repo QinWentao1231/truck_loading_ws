@@ -86,6 +86,14 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
     if not actions:
         raise ValueError("当前面没有可视化动作")
     issue_ids = set(issue_ids or [])
+    physical_risks = {
+        action['id']: action.get('_physical_support')
+        for action in actions
+        if isinstance(action.get('_physical_support'), dict)
+        and action['_physical_support'].get('risk')
+    }
+    physical_issue_ids = set(physical_risks)
+    other_issue_ids = issue_ids - physical_issue_ids
     output_dir = resolve_output_dir()
     output_path = os.path.join(output_dir, filename + '.png')
 
@@ -121,13 +129,36 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
         box_type = str(action.get('box_type', 'unknown'))
         color = type_colors[box_type]
         boxes = _action_boxes(action)
-        for x, y, z, length, width, height in boxes:
+        physical_risk = physical_risks.get(action_id)
+        risk_box_indices = set(
+            physical_risk.get('risk_box_indices', [])
+            if physical_risk else [])
+        for box_index, (x, y, z, length, width, height) in enumerate(
+                boxes, start=1):
             ax.add_patch(Rectangle(
                 (y, z), width, height,
                 facecolor=color, edgecolor='white', linewidth=1.0, alpha=0.86))
             ax3.add_collection3d(Poly3DCollection(
                 cuboid_faces(x, y, z, length, width, height),
                 facecolors=color, edgecolors='white', linewidths=0.45, alpha=0.78))
+            if box_index in risk_box_indices:
+                # 正视图用粗红底边标记支撑不足的单箱；三维图在其底面铺红色面。
+                ax.plot(
+                    [y, y + width], [z, z],
+                    color='#D62728', linewidth=5.0,
+                    solid_capstyle='butt', zorder=8)
+                ax.add_patch(Rectangle(
+                    (y, z), width, height, fill=False,
+                    edgecolor='#D62728', linewidth=2.0, zorder=7))
+                bottom_face = [[
+                    (x, y, z + 1.0),
+                    (x + length, y, z + 1.0),
+                    (x + length, y + width, z + 1.0),
+                    (x, y + width, z + 1.0),
+                ]]
+                ax3.add_collection3d(Poly3DCollection(
+                    bottom_face, facecolors='#D62728',
+                    edgecolors='#B71C1C', linewidths=1.4, alpha=0.62))
             max_x = max(max_x, x + length)
             max_y = max(max_y, y + width)
             max_z = max(max_z, z + height)
@@ -136,14 +167,30 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
         y1 = max(box[1] + box[4] for box in boxes)
         z0 = min(box[2] for box in boxes)
         z1 = max(box[2] + box[5] for box in boxes)
-        edge_color = '#D62728' if action_id in issue_ids else '#263238'
+        if physical_risk:
+            edge_color = '#D62728'
+            line_width = 3.2
+            line_style = '-'
+        elif action_id in issue_ids:
+            edge_color = '#C2185B'
+            line_width = 3.0
+            line_style = '--'
+        else:
+            edge_color = '#263238'
+            line_width = 1.4
+            line_style = '-'
         ax.add_patch(Rectangle(
             (y0, z0), y1 - y0, z1 - z0, fill=False,
-            edgecolor=edge_color, linewidth=3 if action_id in issue_ids else 1.4,
-            linestyle='--' if action_id in issue_ids else '-'))
+            edgecolor=edge_color, linewidth=line_width,
+            linestyle=line_style))
+        support_text = ''
+        if physical_risk:
+            support_text = (
+                f'\nsupport {physical_risk["support_ratio"] * 100:.0f}%'
+                f' / min {physical_risk["min_box_support_ratio"] * 100:.0f}%')
         ax.text(
             (y0 + y1) / 2, (z0 + z1) / 2,
-            f'#{action_id}\n{box_type} x{sum(action["num"])}',
+            f'#{action_id}\n{box_type} x{sum(action["num"])}{support_text}',
             ha='center', va='center', fontsize=8, fontweight='bold', color='#15202B')
         ax3.text(
             max(box[0] + box[3] for box in boxes) + 12,
@@ -174,10 +221,14 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
     ax3.view_init(elev=23, azim=-56)
 
     legends = [Patch(facecolor=type_colors[t], label=f'Type {t}') for t in box_types]
-    if issue_ids:
+    if physical_issue_ids:
         legends.append(Patch(
             facecolor='none', edgecolor='#D62728', linewidth=2.5,
-            linestyle='--', label='Abnormal grab'))
+            linestyle='-', label='Physical support risk'))
+    if other_issue_ids:
+        legends.append(Patch(
+            facecolor='none', edgecolor='#C2185B', linewidth=2.5,
+            linestyle='--', label='Path / other risk'))
     fig.legend(handles=legends, loc='lower center', ncol=max(1, len(legends)),
                frameon=False, bbox_to_anchor=(0.5, 0.02), fontsize=10)
     fig.suptitle(title or filename, fontsize=16, fontweight='bold', y=0.97)

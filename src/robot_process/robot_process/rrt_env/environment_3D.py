@@ -685,6 +685,12 @@ class BinEnv:
         self.reserve_object = config_data['reserve_object']
         self.mixture_z_overlap_min = float(
             config_data.get('mixture_z_overlap_min', 20.0))
+        self.mixture_support_z_tolerance = float(
+            config_data.get('mixture_support_z_tolerance', 20.0))
+        self.mixture_support_min_ratio = float(
+            config_data.get('mixture_support_min_ratio', 0.80))
+        self.mixture_support_min_box_ratio = float(
+            config_data.get('mixture_support_min_box_ratio', 0.60))
         self.objects = []          # 含 reserve_object 外扩的包围盒，用于碰撞检测
         self.display_objects = []  # 真实尺寸的箱体，用于可视化
 
@@ -753,6 +759,144 @@ class BinEnv:
             'right_is_box': bool(right_starts),
             'blocking': blocking,
             'relevant_count': len(relevant),
+        }
+
+    @staticmethod
+    def _rectangle_union_area(rectangles):
+        """计算若干轴对齐二维矩形的并集面积。"""
+        rectangles = [
+            tuple(map(float, rect)) for rect in rectangles
+            if rect[2] > rect[0] and rect[3] > rect[1]
+        ]
+        if not rectangles:
+            return 0.0
+        x_edges = sorted({value for rect in rectangles
+                          for value in (rect[0], rect[2])})
+        area = 0.0
+        for x0, x1 in zip(x_edges, x_edges[1:]):
+            if x1 <= x0:
+                continue
+            intervals = sorted(
+                (rect[1], rect[3]) for rect in rectangles
+                if rect[0] < x1 and rect[2] > x0)
+            if not intervals:
+                continue
+            covered_y = 0.0
+            start, end = intervals[0]
+            for next_start, next_end in intervals[1:]:
+                if next_start <= end:
+                    end = max(end, next_end)
+                else:
+                    covered_y += end - start
+                    start, end = next_start, next_end
+            covered_y += end - start
+            area += (x1 - x0) * covered_y
+        return area
+
+    def analyze_mixture_support(self, action):
+        """分析混装P1当前抓底面受到已码箱体支撑的面积比例。
+
+        只使用 display_objects 中已经实际码放的箱体。支撑面高度与当前
+        放置底面的差值不超过配置容差时视为接触；地面层直接按完全支撑。
+        返回值仅供检查、日志和可视化使用，不参与路径放行。
+        """
+        if action['area'] != 'p1':
+            raise ValueError("混装物理支撑分析当前仅支持P1区域")
+
+        current_boxes = self.to_box(action)
+        if not current_boxes:
+            raise ValueError("当前混装动作没有可分析箱体")
+
+        z_tolerance = max(0.0, self.mixture_support_z_tolerance)
+        min_total_ratio = min(max(self.mixture_support_min_ratio, 0.0), 1.0)
+        min_box_ratio = min(
+            max(self.mixture_support_min_box_ratio, 0.0), 1.0)
+        current_z = min(float(box.position[2]) for box in current_boxes)
+        on_floor = current_z <= z_tolerance
+        per_box = []
+        total_area = 0.0
+        total_supported_area = 0.0
+        supporter_indices = set()
+
+        for box_index, box in enumerate(current_boxes, start=1):
+            x0 = float(box.position[0])
+            y0 = float(box.position[1])
+            x1 = x0 + float(box.length)
+            y1 = y0 + float(box.width)
+            footprint_area = max(0.0, (x1 - x0) * (y1 - y0))
+            total_area += footprint_area
+            support_rectangles = []
+
+            if on_floor:
+                support_rectangles.append((x0, y0, x1, y1))
+            else:
+                for obstacle_index, obstacle in enumerate(
+                        self.display_objects):
+                    obs_x0, obs_y0, _, obs_x1, obs_y1, obs_top = obstacle
+                    if abs(float(obs_top) - current_z) > z_tolerance:
+                        continue
+                    overlap = (
+                        max(x0, float(obs_x0)),
+                        max(y0, float(obs_y0)),
+                        min(x1, float(obs_x1)),
+                        min(y1, float(obs_y1)),
+                    )
+                    if overlap[2] <= overlap[0] or overlap[3] <= overlap[1]:
+                        continue
+                    support_rectangles.append(overlap)
+                    supporter_indices.add(obstacle_index)
+
+            supported_area = min(
+                footprint_area,
+                self._rectangle_union_area(support_rectangles))
+            support_ratio = (
+                supported_area / footprint_area if footprint_area > 0 else 0.0)
+            center_x = (x0 + x1) * 0.5
+            center_y = (y0 + y1) * 0.5
+            center_supported = any(
+                rect[0] <= center_x <= rect[2] and
+                rect[1] <= center_y <= rect[3]
+                for rect in support_rectangles)
+            total_supported_area += supported_area
+            per_box.append({
+                'index': box_index,
+                'footprint': [x0, y0, x1, y1],
+                'support_ratio': round(support_ratio, 6),
+                'center_supported': bool(center_supported),
+            })
+
+        total_ratio = (
+            total_supported_area / total_area if total_area > 0 else 0.0)
+        min_observed_box_ratio = min(
+            item['support_ratio'] for item in per_box)
+        risk_box_indices = [
+            item['index'] for item in per_box
+            if item['support_ratio'] < min_box_ratio or
+            not item['center_supported']
+        ]
+        has_risk = (
+            not on_floor and
+            (total_ratio < min_total_ratio or bool(risk_box_indices)))
+        if total_ratio <= 0.01 and not on_floor:
+            risk_level = 'floating'
+        elif has_risk:
+            risk_level = 'weak_support'
+        else:
+            risk_level = 'ok'
+
+        return {
+            'risk': bool(has_risk),
+            'risk_level': risk_level,
+            'on_floor': bool(on_floor),
+            'support_ratio': round(total_ratio, 6),
+            'unsupported_ratio': round(max(0.0, 1.0 - total_ratio), 6),
+            'min_box_support_ratio': round(min_observed_box_ratio, 6),
+            'risk_box_indices': risk_box_indices,
+            'supporter_count': len(supporter_indices),
+            'z_tolerance_mm': z_tolerance,
+            'min_support_ratio': min_total_ratio,
+            'required_min_box_support_ratio': min_box_ratio,
+            'per_box': per_box,
         }
 
     def trajectory_collision_free(self, path, size, sample_step=10.0):

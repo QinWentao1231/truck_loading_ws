@@ -982,6 +982,7 @@ def main():
                     chk_value = 0   # 同样退出批量预取
                     continue
                 path_issues = []
+                physical_support = None
                 last_grab_action = action          # 记录当前抓，供随后 cmd_stacking 对齐序号
                 last_grab_box_type = action.get('box_type', rp.box_type)
                 # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
@@ -1242,6 +1243,43 @@ def main():
                               + (f"  extra_goals({len(extra_goals)}段): " +
                                  ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
                                  if extra_goals else ""))
+                    # 混装面物理支撑分析只提示和记录，不阻断路径下发。
+                    # 使用当前抓之前已经写入 BinEnv 的真实箱体，检查底面支撑率、
+                    # 单箱最低支撑率以及单箱中心是否落在支撑面内。
+                    if rp.block_type == 'mixture' and action['area'] == 'p1':
+                        try:
+                            physical_support = be.analyze_mixture_support(action)
+                            action['_physical_support'] = physical_support
+                            if physical_support['risk']:
+                                risk_name = (
+                                    '完全悬空'
+                                    if physical_support['risk_level'] == 'floating'
+                                    else '支撑面积不足')
+                                risk_boxes = physical_support['risk_box_indices']
+                                issue_text = (
+                                    f"混装物理结构风险({risk_name}): "
+                                    f"整抓支撑={physical_support['support_ratio'] * 100:.1f}%，"
+                                    f"悬空={physical_support['unsupported_ratio'] * 100:.1f}%，"
+                                    f"最低单箱支撑="
+                                    f"{physical_support['min_box_support_ratio'] * 100:.1f}%，"
+                                    f"风险单箱={risk_boxes or '无'}")
+                                path_issues.append(issue_text)
+                                logs.warning(
+                                    f"[CHK-SUPPORT] Round.{action['id']} "
+                                    f"{issue_text}")
+                            else:
+                                logs.info(
+                                    f"[CHK-SUPPORT] Round.{action['id']} 支撑正常："
+                                    f"整抓={physical_support['support_ratio'] * 100:.1f}%，"
+                                    f"最低单箱="
+                                    f"{physical_support['min_box_support_ratio'] * 100:.1f}%")
+                        except Exception as _support_error:
+                            issue_text = (
+                                f"混装物理支撑分析失败: {_support_error}")
+                            path_issues.append(issue_text)
+                            logs.warning(
+                                f"[CHK-SUPPORT] Round.{action['id']} "
+                                f"{issue_text}")
                     # 规划器只保证箱体垛型在车厢内；路径抬高和手爪高度包围盒
                     # 由本节点叠加。最终 path（含运动学调整后的 APP）必须重新查顶。
                     for height_issue in _check_path_height(path, size, rp.H):
@@ -1358,6 +1396,7 @@ def main():
                         'goal': [round(float(value), 2) for value in x_goal],
                         'cost_sec': round(end_time - start_time, 4),
                         'issues': list(dict.fromkeys(path_issues)),
+                        'physical_support': physical_support,
                     }
                     chk_session['results'].append(chk_result)
 
