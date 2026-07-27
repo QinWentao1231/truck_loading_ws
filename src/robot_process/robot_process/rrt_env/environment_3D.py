@@ -525,14 +525,101 @@ class RobotPosition:
             self.robot_offsets[-1]['action'] = 1
             self.boxes[-1]['action'] = 1
 
+    def _mixture_area_cfg_map(self):
+        """按混装面的已码箱体空间关系生成 area_cfg。
+
+        area_cfg=4 只表示“当前高度的墙边收尾抓”：当前抓在该高度的
+        有效箱体中最靠近一侧车壁，并且其内侧已有箱体的顶面超过当前
+        放置底面50mm。其他情况均返回1，不再使用area_cfg=5。
+        """
+        result = {}
+        placed_by_face = defaultdict(list)
+        eps = 1e-6
+        min_top_above = 50.0
+        all_by_face = defaultdict(list)
+        for action in self.robot_offsets:
+            if action != 'done' and action['area'] == 'p1':
+                all_by_face[action['num_F']].append(action)
+
+        for current in self.robot_offsets:
+            if current == 'done':
+                continue
+            if current['area'] != 'p1':
+                result[current['id']] = 1
+                continue
+
+            cur_x0 = float(current['pos'][0])
+            cur_x1 = cur_x0 + float(current['size'][0])
+            cur_y0 = float(current['pos'][1])
+            cur_y1 = (
+                cur_y0 + sum(current['num']) * float(current['size'][1]))
+            cur_z = float(current['pos'][2])
+
+            # 在当前放置底面高度上仍有实体截面的箱体，用来确定当前抓是否
+            # 位于该高度最靠左壁或最靠右壁的位置。未来更高层箱体不会参与。
+            active_at_height = []
+            for action in all_by_face[current['num_F']]:
+                action_z0 = float(action['pos'][2])
+                action_top = action_z0 + float(action['size'][2])
+                if (action_z0 > cur_z + eps or
+                        action_top <= cur_z + min_top_above + eps):
+                    continue
+                action_x0 = float(action['pos'][0])
+                action_x1 = action_x0 + float(action['size'][0])
+                if min(cur_x1, action_x1) - max(cur_x0, action_x0) <= eps:
+                    continue
+                active_at_height.append(action)
+
+            leftmost_y = min(
+                float(action['pos'][1]) for action in active_at_height)
+            rightmost_y = max(
+                float(action['pos'][1]) +
+                sum(action['num']) * float(action['size'][1])
+                for action in active_at_height)
+            nearest_left_wall = cur_y0 <= leftmost_y + eps
+            nearest_right_wall = cur_y1 >= rightmost_y - eps
+
+            left_has_box = False
+            right_has_box = False
+
+            for other in placed_by_face[current['num_F']]:
+                other_top = (
+                    float(other['pos'][2]) + float(other['size'][2]))
+                if other_top <= cur_z + min_top_above + eps:
+                    continue
+
+                other_x0 = float(other['pos'][0])
+                other_x1 = other_x0 + float(other['size'][0])
+                if min(cur_x1, other_x1) - max(cur_x0, other_x0) <= eps:
+                    continue
+
+                other_y0 = float(other['pos'][1])
+                other_y1 = (
+                    other_y0 + sum(other['num']) *
+                    float(other['size'][1]))
+                if other_y1 <= cur_y0 + eps:
+                    left_has_box = True
+                elif other_y0 >= cur_y1 - eps:
+                    right_has_box = True
+
+            if ((nearest_left_wall and right_has_box) or
+                    (nearest_right_wall and left_has_box)):
+                result[current['id']] = 4
+            else:
+                result[current['id']] = 1
+
+            placed_by_face[current['num_F']].append(current)
+
+        return result
+
     def _finalize(self):
         """末尾处理：标记 block 结束、填充 ori_offsets 快照、计算 area_cfg 位置编号。"""
         self.robot_offsets[-1]['action'] = 2
         self.boxes[-1]['action'] = 2
         self.robot_offsets.append('done')
 
-        # area_cfg 后处理：先按 y 坐标排序确定左/中/右位置编号，再将尾料箱覆盖为 1
-        # 1=最左抓，2=中间抓，3=最右抓；单抓时为 1
+        # 常规/梯形 area_cfg：按同面、同区域、同高度的 y 顺序确定左/中/右。
+        # 混装面使用三维邻箱关系：4=当前高度的墙边收尾抓，其余为1。
         groups = defaultdict(list)
         for offset in self.robot_offsets:
             if offset == 'done':
@@ -549,8 +636,13 @@ class RobotPosition:
                     id_to_cfg[oid] = 3
                 else:
                     id_to_cfg[oid] = 2
+        mixture_cfg = (
+            self._mixture_area_cfg_map()
+            if self.block_type == 'mixture' else {})
         for box in self.boxes:
-            if self.block_type == 'mixture' or box.get('is_tail') or box['area'] == 'p3':
+            if self.block_type == 'mixture':
+                box['area_cfg'] = mixture_cfg.get(box['id'], 1)
+            elif box.get('is_tail') or box['area'] == 'p3':
                 box['area_cfg'] = 1
             else:
                 box['area_cfg'] = id_to_cfg.get(box['id'], 1)
