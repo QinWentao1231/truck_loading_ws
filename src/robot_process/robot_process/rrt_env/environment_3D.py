@@ -11,9 +11,26 @@ def _mixture_items(mixture_face):
     return mixture_face.get('Items', mixture_face.get('items', []))
 
 
+def _decode_mixture_placement(box_type, encoded_num):
+    """解码混装条目的放置区域和真实箱数。
+
+    常规箱(1XX)的 Num>=10 表示按 P3 侧立方式放置，个位数是实际箱数；
+    Num 原值仍需保留给 cmd_get_box。其他箱型和数值维持 P1 语义。
+    """
+    encoded_num = int(encoded_num)
+    if str(box_type).startswith('1') and encoded_num >= 10:
+        return 'p3', encoded_num % 10
+    return 'p1', encoded_num
+
+
 def _mixture_box_count(mixture_face):
-    return sum(item.get('Num', item.get('num', 0))
-               for item in _mixture_items(mixture_face))
+    return sum(
+        _decode_mixture_placement(
+            item.get('Type', item.get('type', '')),
+            item.get('Num', item.get('num', 0)),
+        )[1]
+        for item in _mixture_items(mixture_face)
+    )
 
 
 class Box:
@@ -144,12 +161,13 @@ class RobotPosition:
         }
 
     def _emit(self, area, num, num_F, dir_, pos, is_tail=False,
-              box_type=None, box_size=None):
+              box_type=None, box_size=None, box_num_signal=None):
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
         boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；箱型信号（+10）：
           - 20x 箱型：任意区域 +10
           - 10x / 30x 箱型：仅 P3 区域 +10
+        box_num_signal 非空时，boxes 中保留该原始数字供 cmd_get_box 下发。
         """
         self._id += 1
         num_int = sum(num) if isinstance(num, list) else num
@@ -157,9 +175,12 @@ class RobotPosition:
         action_box_type = self.box_type if box_type is None else box_type
         params = self._box_params(action_box_type)
         action_box_size = list(params['size'] if box_size is None else box_size)
-        box_first = str(action_box_type)[0]
-        if box_first in ('2', '3') or (box_first == '1' and area == 'p3'):
-            num_int += 10
+        if box_num_signal is None:
+            box_first = str(action_box_type)[0]
+            if box_first in ('2', '3') or (box_first == '1' and area == 'p3'):
+                num_int += 10
+        else:
+            num_int = int(box_num_signal)
         self.robot_offsets.append({
             'id': self._id, 'area': area, 'num': num_list, 'gaps': [], 'num_F': num_F,
             'action': 0, 'dir': dir_, 'pos': pos, 'size': action_box_size,
@@ -168,6 +189,7 @@ class RobotPosition:
         self.boxes.append({
             'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F,
             'action': 0, 'area_cfg': 0, 'is_tail': is_tail,
+            'is_two_grab_row_last': False,
             'box_type': action_box_type, 'size': action_box_size,
         })
 
@@ -223,12 +245,12 @@ class RobotPosition:
         return copy.deepcopy(group_src[idx]), copy.deepcopy(stack_src[idx])
 
     def _emit_p1_groups(self, g, s, gap_, height, num_F, n1,
-                        box_type=None, box_size=None):
+                        box_type=None, box_size=None, pattern_index=0):
         """按 Stack/Group 分组方式发出一层 P1 的所有抓取动作。
         n1: 本条 regular/梯形的 N1（P1 每层箱数），用于算右边界（多条 regular 时各条不同）。
-        放置顺序：左(0) → 右(last) → 中间(1..last-1)。
-        g 以访问顺序给出每抓箱数（g[0]=第1抓，g[1]=第2抓…），
-        g_phys[物理槽位] = g[访问步骤] 用于计算实际坐标。
+        通常顺序：左(0) → 右(last) → 中间(1..last-1)。仅第二套模板
+        Group[1]/Stack[1] 恰好为两抓时，使用右(1) → 左(0)。
+        g 按物理位置从左到右给出每组箱数，visit_order 决定实际访问顺序。
         Stack 长度为 N1+1：s[i] 表示第i箱左侧缝隙占比（s[0]=左墙到第0箱，s[N1]=最后一箱到右墙，不参与位置计算）。
         pos = gap * sum(s[:base+1]) * 0.01 + base * w
         若 Stack 在组内部有非零比例（缝隙落在一次抓取中间），num 按缝隙位置拆成子数组，
@@ -236,24 +258,44 @@ class RobotPosition:
         action_box_size = self.box_size if box_size is None else box_size
         box_w = action_box_size[1]
         n_groups = len(g)
-        if n_groups <= 2:
+        if n_groups == 2 and pattern_index == 1:
+            visit_order = [1, 0]
+        elif n_groups <= 2:
             visit_order = list(range(n_groups))
         else:
-            # 先左(0) → 右半段顺序(mid..last) → 左中间(1..mid-1)
-            # mid = ceil(n/2)，例：3组→[0,2,1]，4组→[0,2,3,1]，5组→[0,3,4,1,2]
-            mid = (n_groups + 1) // 2
-            visit_order = [0] + list(range(mid, n_groups)) + list(range(1, mid))
+            # 先固定左右两端，再从左往右补齐中间。
+            # 例：3组→[0,2,1]，4组→[0,3,1,2]，5组→[0,4,1,2,3]
+            visit_order = [0, n_groups - 1] + list(range(1, n_groups - 1))
         placed = set()
         for step, n in enumerate(visit_order):
             base = sum(g[:n])
             num_boxes = g[n]
             pos = gap_ * sum(s[:base + 1]) * 0.01 + base * box_w
-            # dir_：按放置步骤序号决定
-            #   第1抓(step=0) → dir_=1（从右往左放）
-            #   第2抓(step=1)且组数>2 → dir_=2（从左往右放）
-            #   其余 → 看相邻侧：左邻已放 dir_=2，右邻已放 dir_=1，
-            #             两侧均放则比较物理间隙，靠近间隙小的一侧（相等取 dir_=1）
-            if step == 0:
+            # 第二套两抓模板改为右先左后，两抓均结合已放邻组和两侧边界，
+            # 向间隙更小的一侧对齐（相等取 dir_=1）。第一套模板保持原规则。
+            if n_groups == 2 and pattern_index == 1:
+                p1_right_wall = gap_ + n1 * box_w
+                if (n - 1) in placed:
+                    base_left = sum(g[:n - 1])
+                    left_boundary = (
+                        gap_ * sum(s[:base_left + 1]) * 0.01
+                        + (base_left + g[n - 1]) * box_w
+                    )
+                else:
+                    left_boundary = 0
+                if (n + 1) in placed:
+                    base_right = sum(g[:n + 1])
+                    right_boundary = (
+                        gap_ * sum(s[:base_right + 1]) * 0.01
+                        + base_right * box_w
+                    )
+                else:
+                    right_boundary = p1_right_wall
+                left_gap = pos - left_boundary
+                right_gap = right_boundary - (pos + g[n] * box_w)
+                dir_ = 1 if left_gap <= right_gap else 2
+            # 三抓及以上保持原规则：先左、再右，后续抓根据间距决定。
+            elif step == 0:
                 dir_ = 1
             elif step == 1 and n_groups > 2:
                 dir_ = 2
@@ -305,6 +347,12 @@ class RobotPosition:
                 self.robot_offsets[-1]['num'] = seg_counts
                 self.robot_offsets[-1]['gaps'] = seg_gaps
 
+        # Group/Stack 当前行恰好两抓时，记录执行顺序中的最后一抓。
+        # _finalize 会在原左右位置码上加10，供 cmd_get_box 通知机器人
+        # 这一抓完成当前行。简单行（尾料、Isdoor）不经过本函数，不受影响。
+        if n_groups == 2:
+            self.boxes[-1]['is_two_grab_row_last'] = True
+
     def _emit_p1_simple(self, N, grab_num, height, num_F, y_start=0, tail=False):
         """顺序放置 N 个箱子（无间隙分组），用于尾料/梯形门口区。
         tail=True 时使用前置尾料分批规则（余数首批、末抓满抓、禁止单箱）。"""
@@ -355,6 +403,7 @@ class RobotPosition:
                 num_F_reg = num_F_base + f + 1
                 for t in range(T12):
                     # brick 奇偶用全局常规面号 reg_face_base+f，保证跨条连续
+                    pattern_index = (reg_face_base + f + t) % 2
                     g, s = self._layer_pattern(reg_face_base + f, t, Stack, Group)
                     # P2：侧壁区，按面推进条件触发
                     if p2_f < F2 and (f + 1) * self.l > p2_f * self.w:
@@ -363,7 +412,9 @@ class RobotPosition:
                         for i in range(N2):
                             self._emit('p2', grab_p2, num_F_reg, 2, [0, self.W - (i + 1) * self.l, t * self.h])
                     # P1：主区，按 Stack/Group 分组放置
-                    self._emit_p1_groups(g, s, gap, t * self.h, num_F_reg, N1)
+                    self._emit_p1_groups(
+                        g, s, gap, t * self.h, num_F_reg, N1,
+                        pattern_index=pattern_index)
                     if p2_filled:
                         p2_f += grab_p2
                         p2_filled = False
@@ -429,39 +480,31 @@ class RobotPosition:
                 else:
                     trap_gap = (self.W - trap['N1'] * self.w -
                                 (self.l - self.w) * (trap['Group'][0][0] // 10 + trap['Group'][0][1] // 10))
+                    pattern_index = (f + t) % 2
                     g, s = self._layer_pattern(f, t, trap['Stack'], trap['Group'])
-                    self._emit_p1_groups(g, s, trap_gap, t * self.h, num_F_trap, trap['N1'])
+                    self._emit_p1_groups(
+                        g, s, trap_gap, t * self.h, num_F_trap, trap['N1'],
+                        pattern_index=pattern_index)
             # 梯形 P3
             for t3 in range(trap['T3']):
                 self._emit_p3_row(trap['N3'], trap['T1'] * self.h + t3 * self.w, num_F_trap)
-            # 梯形尾料：10x→P3顶置（侧立），20x/30x→P1顶置（竖放），仅一层，超出丢弃
+            # 梯形尾料：常规箱/细支箱/中支箱统一P1顶置（竖放），
+            # 仅放一层，超出当前P1单层容量的部分丢弃。
             if trap['Nx'] != 0:
                 z_tail = trap['T1'] * self.h + trap['T3'] * self.w
-                box_first = str(self.box_type)[0]
-                if box_first == '1':
-                    # P3顶置：规则同 regular E==2
-                    N_cap = trap['N3'] if trap['N3'] != 0 else int(self.W // self.h)
-                    Nx_ = min(N_cap, trap['Nx'])
-                    if trap['Nx'] > N_cap:
-                        _logger.warning(
-                            f"梯形P3尾料超出单行容量，Nx={trap['Nx']} > N3_={N_cap}"
-                            f"（面序={f}），超出 {trap['Nx'] - N_cap} 个丢弃")
-                    self._emit_p3_row(Nx_, z_tail, num_F_trap)
-                else:
-                    # P1顶置：规则同 regular E==3
-                    N_cap = int((self.W - self.RW) // self.w)
-                    Nx_ = min(N_cap, trap['Nx'])
-                    if trap['Nx'] > N_cap:
-                        _logger.warning(
-                            f"梯形P1尾料超出单行容量，Nx={trap['Nx']} > N1_={N_cap}"
-                            f"（面序={f}），超出 {trap['Nx'] - N_cap} 个丢弃")
-                    self._emit_p1_simple(Nx_, self.grab_num_p1, z_tail, num_F_trap,
-                                         tail=True)
+                N_cap = int((self.W - self.RW) // self.w)
+                Nx_ = min(N_cap, trap['Nx'])
+                if trap['Nx'] > N_cap:
+                    _logger.warning(
+                        f"梯形P1尾料超出单行容量，Nx={trap['Nx']} > N1_={N_cap}"
+                        f"（面序={f}），超出 {trap['Nx'] - N_cap} 个丢弃")
+                self._emit_p1_simple(
+                    Nx_, self.grab_num_p1, z_tail, num_F_trap, tail=True)
             self.robot_offsets[-1]['action'] = 1
             self.boxes[-1]['action'] = 1
 
     def _parse_mixture(self):
-        """混装面：按 Items 中给出的箱型、数量和 Pos 直接生成放置动作。"""
+        """按混装 Items 生成动作；1XX 的 Num>=10 解码为 P3 放置。"""
         for face_idx, mix in enumerate(self.mixture):
             num_F = face_idx + 1
             emitted_before = len(self.robot_offsets)
@@ -469,10 +512,10 @@ class RobotPosition:
             items = _mixture_items(mix)
             for item_idx, item in enumerate(items):
                 box_type = item.get('Type', item.get('type', ''))
-                num = item.get('Num', item.get('num', 0))
+                encoded_num = item.get('Num', item.get('num', 0))
                 pos = item.get('Pos', item.get('pos', {})) or {}
                 try:
-                    num = int(num)
+                    encoded_num = int(encoded_num)
                     pos_x = float(pos.get('X', pos.get('x', 0.0)))
                     pos_y = float(pos.get('Y', pos.get('y', 0.0)))
                     pos_z = float(pos.get('Z', pos.get('z', 0.0)))
@@ -482,9 +525,16 @@ class RobotPosition:
 
                 if not box_type:
                     raise ValueError(f"Mixture 面{num_F}第{item_idx + 1}项缺少箱型 Type")
-                if num <= 0:
+                if encoded_num <= 0:
                     raise ValueError(
-                        f"Mixture 面{num_F}第{item_idx + 1}项 Num 必须大于 0，当前为 {num}")
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Num 必须大于 0，"
+                        f"当前为 {encoded_num}")
+                area, actual_num = _decode_mixture_placement(
+                    box_type, encoded_num)
+                if actual_num <= 0:
+                    raise ValueError(
+                        f"Mixture 面{num_F}第{item_idx + 1}项 Num={encoded_num} "
+                        f"解码后的真实数量必须大于 0")
                 if not all(math.isfinite(v) for v in (pos_x, pos_y, pos_z)):
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项 Pos 含非有限数值")
@@ -495,30 +545,39 @@ class RobotPosition:
                 params = self._box_params(box_type)
                 box_size = params['size']
                 box_l, box_w, box_h = box_size
-                if num > params['grab_p1']:
+                grab_limit = (
+                    params['grab_p3'] if area == 'p3'
+                    else params['grab_p1'])
+                if actual_num > grab_limit:
                     raise ValueError(
-                        f"Mixture 面{num_F}第{item_idx + 1}项 Num={num} 超出"
-                        f"箱型 {box_type} 的 P1 单抓能力 {params['grab_p1']}")
-                if pos_y + num * box_w > self.W:
+                        f"Mixture 面{num_F}第{item_idx + 1}项 "
+                        f"Num={encoded_num}(真实数量={actual_num}) 超出"
+                        f"箱型 {box_type} 的 {area.upper()} 单抓能力 {grab_limit}")
+                y_span = box_h if area == 'p3' else box_w
+                z_span = box_w if area == 'p3' else box_h
+                if pos_y + actual_num * y_span > self.W:
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项沿车宽超界："
-                        f"Y({pos_y}) + Num({num})×箱宽({box_w}) > {self.W}")
+                        f"Y({pos_y}) + 真实数量({actual_num})×"
+                        f"{area.upper()}宽度({y_span}) > {self.W}")
                 if pos_x + box_l > self.L:
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项沿车深超界："
                         f"X({pos_x}) + 箱长({box_l}) > {self.L}")
-                if pos_z + box_h > self.H:
+                if pos_z + z_span > self.H:
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项沿车高超界："
-                        f"Z({pos_z}) + 箱高({box_h}) > {self.H}")
+                        f"Z({pos_z}) + {area.upper()}高度({z_span}) > {self.H}")
 
                 # 接口与内部坐标一致：X=车深、Y=车宽、Z=车高。
                 internal_pos = [pos_x, pos_y, pos_z]
-                center_y = pos_y + num * box_w * 0.5
+                center_y = pos_y + actual_num * y_span * 0.5
                 dir_ = 1 if center_y <= self.W * 0.5 else 2
                 self._emit(
-                    'p1', num, num_F, dir_, internal_pos,
-                    box_type=box_type, box_size=box_size)
+                    area, actual_num, num_F, dir_, internal_pos,
+                    box_type=box_type, box_size=box_size,
+                    box_num_signal=(
+                        encoded_num if area == 'p3' else None))
 
             if len(self.robot_offsets) == emitted_before:
                 raise ValueError(f"Mixture 面{num_F}的 Items 为空")
@@ -618,7 +677,8 @@ class RobotPosition:
         self.boxes[-1]['action'] = 2
         self.robot_offsets.append('done')
 
-        # 常规/梯形 area_cfg：按同面、同区域、同高度的 y 顺序确定左/中/右。
+        # 常规/梯形 area_cfg：按同面、同区域、同高度的 y 顺序确定左/中/右；
+        # Group/Stack 两抓行的执行末抓在原位置码上加10（11或13）。
         # 混装面使用三维邻箱关系：4=当前高度的墙边收尾抓，其余为1。
         groups = defaultdict(list)
         for offset in self.robot_offsets:
@@ -646,6 +706,8 @@ class RobotPosition:
                 box['area_cfg'] = 1
             else:
                 box['area_cfg'] = id_to_cfg.get(box['id'], 1)
+            if box.get('is_two_grab_row_last'):
+                box['area_cfg'] += 10
 
         # 每面单层抓数映射：num_F → 该面 P1 底层(最低z)的抓取次数
         # 直接从生成的 offsets 数，对多条 regular / 梯形 / 尾料面均精确，不依赖单一 Group
@@ -704,22 +766,22 @@ class BinEnv:
         return all(a[i] < b[i + 3] - tol and a[i + 3] > b[i] + tol
                    for i in range(3))
 
-    def mixture_side_clearance(self, action, left_wall, right_wall,
-                               min_z_overlap=None):
-        """按真实已码箱体计算混装抓取目标左右两侧的可用空间。
+    def side_clearance(self, action, left_wall, right_wall,
+                       min_z_overlap=None):
+        """按真实已码箱体计算P1/P3抓取目标左右两侧的可用空间。
 
         与规则垛的“底部 Z 完全相等”不同，这里使用 X/Z 包围盒的有效重叠
         判断某个已码箱体是否会影响当前抓的横向进入。返回的 blocking 表示
         目标位置本身已经与已有箱体重叠，由调用方决定回退或报警。
         """
-        if action['area'] != 'p1':
-            raise ValueError("混装动态 APP 当前仅支持 P1 区域")
+        if action['area'] not in ('p1', 'p3'):
+            raise ValueError("侧向空间分析仅支持 P1/P3 区域")
         if min_z_overlap is None:
             min_z_overlap = self.mixture_z_overlap_min
 
         current_boxes = self.to_box(action)
         if not current_boxes:
-            raise ValueError("当前混装动作没有可用箱体")
+            raise ValueError("当前动作没有可用箱体")
 
         cur_x0 = min(box.position[0] for box in current_boxes)
         cur_y0 = min(box.position[1] for box in current_boxes)
@@ -761,6 +823,64 @@ class BinEnv:
             'relevant_count': len(relevant),
         }
 
+    def mixture_side_clearance(self, action, left_wall, right_wall,
+                               min_z_overlap=None):
+        """兼容混装动态APP调用，仅允许P1，内部复用通用侧向空间分析。"""
+        if action['area'] != 'p1':
+            raise ValueError("混装动态 APP 当前仅支持 P1 区域")
+        return self.side_clearance(
+            action,
+            left_wall=left_wall,
+            right_wall=right_wall,
+            min_z_overlap=min_z_overlap,
+        )
+
+    @staticmethod
+    def mixture_gripper_wall_clearance(action, left_wall, right_wall):
+        """检查混装 P1 固定长度手抓在目标位置是否越过车厢侧壁。
+
+        P1 手抓按箱型的最大单抓数确定固定宽度，并与本抓箱体左边缘对齐；
+        尾抓箱数少于最大单抓数时，空余手抓长度仍向 +Y 方向伸出。
+        """
+        if action['area'] != 'p1':
+            raise ValueError("混装固定手抓车壁检查当前仅支持 P1 区域")
+
+        actual_num = int(sum(action['num']))
+        if actual_num <= 0:
+            raise ValueError("当前混装动作的实际箱数必须大于0")
+        grip_capacity = int(action.get('grab_num_p1', actual_num))
+        if grip_capacity <= 0:
+            raise ValueError("当前箱型的P1最大单抓数必须大于0")
+        grip_capacity = max(grip_capacity, actual_num)
+
+        box_width = float(action['size'][1])
+        if box_width <= 0:
+            raise ValueError("当前混装动作的P1箱宽必须大于0")
+
+        box_left = float(action['pos'][1])
+        box_right = box_left + actual_num * box_width
+        gripper_left = box_left
+        gripper_right = gripper_left + grip_capacity * box_width
+        left_wall = float(left_wall)
+        right_wall = float(right_wall)
+        left_overhang = max(0.0, left_wall - gripper_left)
+        right_overhang = max(0.0, gripper_right - right_wall)
+        return {
+            'actual_num': actual_num,
+            'grip_capacity': grip_capacity,
+            'box_width': box_width,
+            'box_left': box_left,
+            'box_right': box_right,
+            'gripper_left': gripper_left,
+            'gripper_right': gripper_right,
+            'gripper_width': grip_capacity * box_width,
+            'left_wall': left_wall,
+            'right_wall': right_wall,
+            'left_overhang': left_overhang,
+            'right_overhang': right_overhang,
+            'collision': left_overhang > 0.0 or right_overhang > 0.0,
+        }
+
     @staticmethod
     def _rectangle_union_area(rectangles):
         """计算若干轴对齐二维矩形的并集面积。"""
@@ -793,11 +913,91 @@ class BinEnv:
             area += (x1 - x0) * covered_y
         return area
 
+    @staticmethod
+    def _convex_hull(points):
+        """返回二维点集的凸包顶点（逆时针，使用单调链算法）。"""
+        points = sorted({
+            (float(point[0]), float(point[1])) for point in points
+        })
+        if len(points) <= 1:
+            return points
+
+        def _cross(origin, first, second):
+            return (
+                (first[0] - origin[0]) * (second[1] - origin[1]) -
+                (first[1] - origin[1]) * (second[0] - origin[0]))
+
+        lower = []
+        for point in points:
+            while (len(lower) >= 2 and
+                   _cross(lower[-2], lower[-1], point) <= 0):
+                lower.pop()
+            lower.append(point)
+        upper = []
+        for point in reversed(points):
+            while (len(upper) >= 2 and
+                   _cross(upper[-2], upper[-1], point) <= 0):
+                upper.pop()
+            upper.append(point)
+        return lower[:-1] + upper[:-1]
+
+    @staticmethod
+    def _point_in_convex_polygon(point, polygon, tolerance=1e-6):
+        """判断点是否位于凸多边形内部或边界上。"""
+        if not polygon:
+            return False
+        px, py = map(float, point)
+        if len(polygon) == 1:
+            return (
+                abs(px - polygon[0][0]) <= tolerance and
+                abs(py - polygon[0][1]) <= tolerance)
+        if len(polygon) == 2:
+            first, second = polygon
+            cross = (
+                (second[0] - first[0]) * (py - first[1]) -
+                (second[1] - first[1]) * (px - first[0]))
+            if abs(cross) > tolerance:
+                return False
+            return (
+                min(first[0], second[0]) - tolerance <= px <=
+                max(first[0], second[0]) + tolerance and
+                min(first[1], second[1]) - tolerance <= py <=
+                max(first[1], second[1]) + tolerance)
+
+        cross_sign = 0
+        for index, first in enumerate(polygon):
+            second = polygon[(index + 1) % len(polygon)]
+            cross = (
+                (second[0] - first[0]) * (py - first[1]) -
+                (second[1] - first[1]) * (px - first[0]))
+            if abs(cross) <= tolerance:
+                continue
+            current_sign = 1 if cross > 0 else -1
+            if cross_sign and current_sign != cross_sign:
+                return False
+            cross_sign = current_sign
+        return True
+
+    @classmethod
+    def _support_hull_contains(cls, point, rectangles):
+        """判断重心投影是否落在全部接触面的联合支撑凸包内。"""
+        corners = [
+            corner
+            for x0, y0, x1, y1 in rectangles
+            for corner in (
+                (x0, y0), (x0, y1), (x1, y0), (x1, y1))
+        ]
+        return cls._point_in_convex_polygon(
+            point, cls._convex_hull(corners))
+
     def analyze_mixture_support(self, action):
         """分析混装P1当前抓底面受到已码箱体支撑的面积比例。
 
         只使用 display_objects 中已经实际码放的箱体。支撑面高度与当前
         放置底面的差值不超过配置容差时视为接触；地面层直接按完全支撑。
+        稳定性按重心投影是否落在所有接触面的联合凸包内判断：上层箱跨在
+        两个下层箱上时，即使每个接触面较小，只要两侧能共同托住重心就稳定。
+        面积比例保留为诊断信息，不再单独触发“支撑面积不足”。
         返回值仅供检查、日志和可视化使用，不参与路径放行。
         """
         if action['area'] != 'p1':
@@ -826,6 +1026,7 @@ class BinEnv:
             footprint_area = max(0.0, (x1 - x0) * (y1 - y0))
             total_area += footprint_area
             support_rectangles = []
+            box_supporter_indices = set()
 
             if on_floor:
                 support_rectangles.append((x0, y0, x1, y1))
@@ -845,6 +1046,7 @@ class BinEnv:
                         continue
                     support_rectangles.append(overlap)
                     supporter_indices.add(obstacle_index)
+                    box_supporter_indices.add(obstacle_index)
 
             supported_area = min(
                 footprint_area,
@@ -857,12 +1059,31 @@ class BinEnv:
                 rect[0] <= center_x <= rect[2] and
                 rect[1] <= center_y <= rect[3]
                 for rect in support_rectangles)
+            hull_supported = self._support_hull_contains(
+                (center_x, center_y), support_rectangles)
+            if on_floor:
+                support_mode = 'floor'
+            elif center_supported:
+                support_mode = 'direct'
+            elif hull_supported and len(box_supporter_indices) >= 2:
+                support_mode = 'bridge'
+            elif supported_area <= 0:
+                support_mode = 'floating'
+            else:
+                support_mode = 'unbalanced'
+            stable = (
+                on_floor or center_supported or
+                (hull_supported and len(box_supporter_indices) >= 2))
             total_supported_area += supported_area
             per_box.append({
                 'index': box_index,
                 'footprint': [x0, y0, x1, y1],
                 'support_ratio': round(support_ratio, 6),
                 'center_supported': bool(center_supported),
+                'hull_supported': bool(hull_supported),
+                'stable': bool(stable),
+                'support_mode': support_mode,
+                'supporter_count': len(box_supporter_indices),
             })
 
         total_ratio = (
@@ -871,12 +1092,11 @@ class BinEnv:
             item['support_ratio'] for item in per_box)
         risk_box_indices = [
             item['index'] for item in per_box
-            if item['support_ratio'] < min_box_ratio or
-            not item['center_supported']
+            if not item['stable']
         ]
         has_risk = (
             not on_floor and
-            (total_ratio < min_total_ratio or bool(risk_box_indices)))
+            bool(risk_box_indices))
         if total_ratio <= 0.01 and not on_floor:
             risk_level = 'floating'
         elif has_risk:
@@ -896,6 +1116,8 @@ class BinEnv:
             'z_tolerance_mm': z_tolerance,
             'min_support_ratio': min_total_ratio,
             'required_min_box_support_ratio': min_box_ratio,
+            'stability_rule': 'center_of_mass_in_support_hull',
+            'area_thresholds_diagnostic_only': True,
             'per_box': per_box,
         }
 

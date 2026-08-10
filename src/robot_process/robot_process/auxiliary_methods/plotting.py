@@ -70,7 +70,9 @@ def _action_boxes(action):
     return boxes
 
 
-def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
+def save_face_layout(
+        actions, car_size, filename, title=None, issue_ids=None,
+        output_dir=None):
     """保存一整面垛型的 PNG 正视图和三维图，返回输出路径。
 
     matplotlib 采用延迟导入；现场环境缺少绘图库时由调用方捕获并仅记录。
@@ -94,7 +96,8 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
     }
     physical_issue_ids = set(physical_risks)
     other_issue_ids = issue_ids - physical_issue_ids
-    output_dir = resolve_output_dir()
+    output_dir = output_dir or resolve_output_dir()
+    os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, filename + '.png')
 
     box_types = list(dict.fromkeys(str(a.get('box_type', 'unknown'))
@@ -239,7 +242,7 @@ def save_face_layout(actions, car_size, filename, title=None, issue_ids=None):
 
 
 class Plot(object):
-    def __init__(self, filename):
+    def __init__(self, filename, output_dir=None):
         """
         Create a plot
         :param filename: filename (without extension)
@@ -247,7 +250,8 @@ class Plot(object):
         """
         if py is None or go is None:
             raise RuntimeError("plotly 未安装，无法生成逐抓 HTML 可视化")
-        output_dir = resolve_output_dir()
+        output_dir = output_dir or resolve_output_dir()
+        os.makedirs(output_dir, exist_ok=True)
         self.filename = os.path.join(output_dir, filename + ".html")
         self.data = []
         self.layout = {'title': 'Plot',

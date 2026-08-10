@@ -24,6 +24,7 @@ _ACT_LABEL   = {1: 'normal', 2: 'face_end', 3: 'block_end', 4: 'all_end'}
 _AREA_LABEL  = {1: 'p1', 2: 'p2', 3: 'p3'}
 
 _STACK_LABEL = {1: '有结果', 2: '异常'}
+_CHK_LABEL   = {1: '通过', 2: '失败'}
 
 MENU = """
 ┌──────────────────────────────────────────┐
@@ -32,7 +33,7 @@ MENU = """
 │  2. get_per_count 请求本面箱数             │
 │  3. get_box       请求来料配方             │
 │  4. get_path      请求放置路径             │
-│  5. chk_path      触发路径预取             │
+│  5. chk_path      批量检查路径             │
 │  6. stacking      触发堆叠检测             │
 │  9. 断开连接                              │
 │  q. 退出                                 │
@@ -76,8 +77,11 @@ def handle_get_pallet(sock):
     print(f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  车宽={f0[2]:.0f}mm")
     print(f"  箱尺寸 L={f1[0]:.0f} W={f1[1]:.0f} H={f1[2]:.0f}")
     if n >= 3:
-        mixture_pos = parse_floats(blocks[2], 1)[0]
-        print(f"  混装 block 位置={int(mixture_pos)}")
+        mixture_positions = [
+            int(position) for position in parse_floats(blocks[2], 6)
+            if position > 0
+        ]
+        print(f"  混装 block 位置={mixture_positions or '无'}")
 
 
 def handle_get_per_count(sock):
@@ -114,7 +118,10 @@ def handle_get_path(sock):
 
 def handle_chk_path(sock):
     sock.sendall(CMD_CHK_PATH)
-    print("  chk_path 已发送（服务端无响应体，后续路径由服务端批量推送）")
+    _, blocks = recv_response(sock)
+    status = int(parse_floats(blocks[0], 1)[0])
+    status_text = _CHK_LABEL.get(status, f'未知状态 {status}')
+    print(f"  chk_path 整体结果={status}（{status_text}）")
 
 
 def handle_stacking(sock):

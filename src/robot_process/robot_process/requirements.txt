@@ -1,6 +1,7 @@
 colorlog>=6.7.0
 grpcio>=1.80.0
-numpy>=1.24.4
+# Ubuntu/ROS 的系统 OpenCV 4.6 按 NumPy 1.x ABI 编译。
+numpy>=1.24.4,<2.0
 open3d>=0.17.0
 plotly>=5.15.0
 protobuf>=4.25.0

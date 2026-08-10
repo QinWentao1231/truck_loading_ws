@@ -7,6 +7,7 @@ import time
 import struct
 import json
 import pickle
+import logging
 import numpy as np
 from rrt_env.environment_3D import BinEnv, RobotPosition
 from rrt_env.fanuc_kinematics import FanucKinematics, make_uf_transform
@@ -29,7 +30,7 @@ cmd_get_pallet    = 'fefe0000010100000000000000000000'  # 请求垛型总体信�
 cmd_get_per_count = 'fefe0000010200000000000000000000'  # 请求当前码垛面箱数
 cmd_get_box       = 'fefe0000010300000000000000000000'  # 请求下一箱来料配方
 cmd_get_path      = 'fefe0000010400000000000000000000'  # 请求下一抓放置路径
-cmd_chk_path      = 'fefe0000010500000000000000000000'  # 触发路径预取（批量拉取剩余路径）
+cmd_chk_path      = 'fefe0000010500000000000000000000'  # 批量检查剩余路径（仅返回整体状态）
 cmd_stacking      = 'fefe0000010600000000000000000000'  # 触发堆叠检测（双雷达采集+宽度计算）
 
 # ── 响应报文头（服务端→机器人）────────────────────────────────────────
@@ -60,6 +61,56 @@ def _yaw_offset_for_box(box_type) -> float:
     return j1_photo - _J1_FACE_DEG
 
 
+def _compact_python_literal(value):
+    """把垛面检测参数格式化为简洁、可直接复制的 Python 字面量。"""
+    if value is None:
+        return 'None'
+    if isinstance(value, bool):
+        return 'True' if value else 'False'
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if np.isfinite(number):
+            text = f'{number:.6f}'.rstrip('0').rstrip('.')
+            return text if text not in ('', '-0') else '0'
+    return repr(value)
+
+
+def _format_stacking_replay_call(
+        pcd_name, yaw_offset_deg, rel_top_h, box_h,
+        expected_width_mm, box_width_mm, box_type,
+        target_y_mm, car_width_mm, stair_step_mode,
+        detection_width_mm, detection_target_y_mm):
+    """生成可粘贴到 stacking_detection_node.py 离线入口的回放调用。"""
+    box_type_text = str(box_type)
+    replay_box_type = (
+        int(box_type_text) if box_type_text.isdigit() else box_type_text)
+    params = (
+        ('yaw_offset_deg', yaw_offset_deg),
+        ('view', True),
+        ('rel_top_h', rel_top_h),
+        ('box_h', box_h),
+        ('expected_width_mm', expected_width_mm),
+        ('box_width_mm', box_width_mm),
+        ('box_type', replay_box_type),
+        ('target_y_mm', target_y_mm),
+        ('car_width_mm', car_width_mm),
+        ('stair_step_mode', stair_step_mode),
+        ('detection_width_mm', detection_width_mm),
+        ('detection_target_y_mm', detection_target_y_mm),
+    )
+    lines = [
+        f'# pcd_name = {pcd_name!r}',
+        'measured = _compute_width(',
+        '    pcd, empty,',
+    ]
+    lines.extend(
+        f'    {name}={_compact_python_literal(value)},'
+        for name, value in params
+    )
+    lines.append(')  # view 跟随顶部 VIEW 开关')
+    return '\n'.join(lines)
+
+
 def _build_msg(num_blocks: int, payload: bytes) -> bytes:
     """拼装完整响应报文。
     结构：_MSG_HEADER(7B) + num_blocks(1B) + err_code(1B)=00
@@ -79,13 +130,18 @@ def _data_block(*floats) -> bytes:
     )
 
 
+def _find_mixture_block_positions(rp_list) -> list[int]:
+    """返回所有混装 block 在 rp_list 中从 1 开始的位置。"""
+    return [
+        index for index, item in enumerate(rp_list, start=1)
+        if item.block_type == 'mixture'
+    ]
+
+
 def _find_mixture_block_position(rp_list) -> int:
-    """返回首个混装 block 在 rp_list 中从 1 开始的位置；不存在时返回 0。"""
-    return next(
-        (index for index, item in enumerate(rp_list, start=1)
-         if item.block_type == 'mixture'),
-        0,
-    )
+    """兼容旧调用：返回首个混装 block 的位置；不存在时返回 0。"""
+    positions = _find_mixture_block_positions(rp_list)
+    return positions[0] if positions else 0
 
 
 def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
@@ -122,7 +178,9 @@ def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
             max(config_be['p3_init_pos'][2] - box_z, x_app[2]),
         ]
 
-    if action['pos'][2] < box_z:
+    # 第一层以箱体底面 Z=0 判断。不能用“底面Z < 当前箱高”判断：
+    # 混装面箱高不一致时，较高箱可能把已经位于第二层的箱子误判为第一层。
+    if np.isclose(float(action['pos'][2]), 0.0, atol=1e-3):
         x0[0] = 200
 
     if action['pos'][2] + box_z < config_be['p3_init_pos'][2]:
@@ -197,7 +255,7 @@ def _check_path_height(path, carried_size, car_height, tolerance=0.5):
 
 def _save_face_visualizations(rp, block_number, face_number, stamp,
                               issue_ids=None, save_face=True,
-                              save_mixture=False):
+                              save_mixture=False, output_dir=None):
     """保存面级PNG；混装面可额外保存独立的 mixture_pallet 文件。"""
     actions = [
         action for action in rp.ori_offsets
@@ -213,6 +271,7 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
             f'face_block{block_number:02d}_face{face_number:02d}_{stamp}',
             title=common_title,
             issue_ids=issue_ids,
+            output_dir=output_dir,
         ))
     if save_mixture and rp.block_type == 'mixture':
         paths.append(save_face_layout(
@@ -221,6 +280,7 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
             f'mixture_pallet_block{block_number:02d}_face{face_number:02d}_{stamp}',
             title=f'Mixture pallet - Block {block_number} Face {face_number}',
             issue_ids=issue_ids,
+            output_dir=output_dir,
         ))
     return paths
 
@@ -259,6 +319,7 @@ def _save_parsed_order(config_rp, rp_list, source='online'):
         'total_box_count': sum(item['box_count'] for item in block_summaries),
         'total_grab_count': sum(item['grab_count'] for item in block_summaries),
         'mixture_block_position': _find_mixture_block_position(rp_list),
+        'mixture_block_positions': _find_mixture_block_positions(rp_list),
         'block_summaries': block_summaries,
         'order_fields': normalized_blocks,
     }
@@ -300,21 +361,31 @@ def _write_chk_path_summary(session):
     """将 cmd_chk_path 批量检查结果写入 TXT/JSON，并返回统计信息。"""
     results = session['results']
     abnormal = [item for item in results if item['issues']]
+    system_issues = session.get('system_issues', [])
+    status = 2 if abnormal or system_issues else 1
+    output_dir = session.get('output_dir')
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        prefix = os.path.join(output_dir, 'cmd_chk_path_summary')
+    else:
+        output_dir = resolve_output_dir(session['stamp'][:8])
+        prefix = os.path.join(
+            output_dir, f'cmd_chk_path_summary_{session["stamp"]}')
     summary = {
         'started_at': session['started_at'],
         'finished_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'output_dir': output_dir,
+        'session_log_path': session.get('log_path'),
         'total_grabs': len(results),
         'normal_grabs': len(results) - len(abnormal),
         'abnormal_grabs': len(abnormal),
+        'status': status,
         'path_htmls': session.get('path_htmls', []),
         'face_images': session.get('face_images', []),
-        'system_issues': session.get('system_issues', []),
+        'system_issues': system_issues,
         'mixture_fields': session.get('mixture_fields', []),
         'results': results,
     }
-    output_dir = resolve_output_dir(session['stamp'][:8])
-    prefix = os.path.join(
-        output_dir, f'cmd_chk_path_summary_{session["stamp"]}')
     json_path = prefix + '.json'
     txt_path = prefix + '.txt'
     with open(json_path, 'w', encoding='utf-8') as file:
@@ -324,9 +395,12 @@ def _write_chk_path_summary(session):
         'cmd_chk_path 路径检查汇总',
         f'开始时间: {summary["started_at"]}',
         f'结束时间: {summary["finished_at"]}',
+        f'会话目录: {summary["output_dir"]}',
+        f'独立日志: {summary["session_log_path"]}',
         f'总抓数: {summary["total_grabs"]}',
         f'正常抓数: {summary["normal_grabs"]}',
         f'异常抓数: {summary["abnormal_grabs"]}',
+        f'返回状态: float {summary["status"]}',
     ]
     if abnormal:
         lines.append('异常定位:')
@@ -373,7 +447,49 @@ def _log_chk_path_summary(summary, logger):
             logger.info(line)
     logger.info(f'汇总TXT: {summary["txt_path"]}')
     logger.info(f'汇总JSON: {summary["json_path"]}')
+    logger.info(f'检查会话目录: {summary["output_dir"]}')
     logger.info('===========================================')
+
+
+def _create_chk_path_output_dir(stamp):
+    """创建 YYYYMMDD/HHMMSS 检查会话目录；同秒重复时追加序号。"""
+    day_text = stamp[:8]
+    time_text = stamp[9:15]
+    day_dir = resolve_output_dir(day_text)
+    base_dir = os.path.join(day_dir, time_text)
+    output_dir = base_dir
+    suffix = 2
+    while os.path.exists(output_dir):
+        output_dir = f'{base_dir}_{suffix:02d}'
+        suffix += 1
+    os.makedirs(output_dir, exist_ok=False)
+    return output_dir
+
+
+def _attach_chk_path_log(session, logger):
+    """给当前检查会话挂载独立日志文件，同时保留主日志输出。"""
+    log_path = os.path.join(session['output_dir'], 'cmd_chk_path.log')
+    handler = logging.FileHandler(log_path, encoding='utf-8')
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(filename)s[line:%(lineno)d] - '
+        '%(levelname)s: %(message)s'))
+    logger.addHandler(handler)
+    session['_log_handler'] = handler
+    session['log_path'] = log_path
+    return log_path
+
+
+def _close_chk_path_log(session, logger):
+    """卸载并关闭当前检查会话的独立日志句柄。"""
+    if not session:
+        return
+    handler = session.pop('_log_handler', None)
+    if handler is None:
+        return
+    logger.removeHandler(handler)
+    handler.flush()
+    handler.close()
 
 
 def _parse_stack_group(src, stack_attr='Stack', group_attr='Group'):
@@ -808,14 +924,14 @@ def main():
         try:
             rp_list = [RobotPosition(block_cfg)
                        for block_cfg in (config_rp if isinstance(config_rp, list) else [config_rp])]
-            mixture_block_position = _find_mixture_block_position(rp_list)
+            mixture_block_positions = _find_mixture_block_positions(rp_list)
             # 最后一个 block 的末条目 action 升为 3（全部结束），其余 block 末条目保持 2（block 结束）
             rp_list[-1].boxes[-1]['action'] = 3
             last_offset = next(x for x in reversed(rp_list[-1].robot_offsets) if x != 'done')
             last_offset['action'] = 3
             logs.info(
                 f"计算垛序成功！共 {len(rp_list)} 个 block，"
-                f"混装 block 位置={mixture_block_position}")
+                f"混装 block 位置={mixture_block_positions or '无'}")
         except Exception as e:
             logs.error(f"垛序计算失败，请检查垛型数据: {e}")
             sys.exit(1)
@@ -837,7 +953,7 @@ def main():
         be.reset()
         dis_x = 0          # 角点激光补偿：x方向偏差（暂未使用）
         dis_y = 0          # 角点激光补偿：y方向偏差，用于修正 x_goal
-        # chk_value: 批量预取计数器，0=正常逐抓模式，>0=预取剩余抓次（cmd_chk_path触发）
+        # chk_value: 批量检查计数器，0=正常逐抓模式，>0=检查剩余抓次（cmd_chk_path触发）
         chk_value = 0
         # chk_session: cmd_chk_path 本轮逐抓结果、面级图片及最终汇总。
         chk_session = None
@@ -846,6 +962,13 @@ def main():
         # last_grab_box_type: 那一抓的实际箱型（Mixture 内可按 Items 切换）
         last_grab_action = None
         last_grab_box_type = None
+        # 当前抓所属 block 的车宽/类型也必须随抓保存：block 末抓发出后 rp
+        # 会提前切到下一 block，cmd_stacking 仍应使用上一抓的订单位置信息。
+        last_grab_car_width = None
+        last_grab_block_type = None
+        # 当前抓下发前的真实侧向缺口，仅用于点云候选筛选。
+        # 机器人报文中的理论抓宽仍由箱数×单箱宽计算，不使用此值。
+        last_grab_detection_gap = None
         # cur_box_id/cur_path_id: 当前已下发的 box/path 抓号，每次"先存后发"写入游标
         cur_box_id = 0
         cur_path_id = 0
@@ -854,6 +977,8 @@ def main():
             rp_idx, rp, last_grab_action, cur_box_id, cur_path_id = _fast_forward(rp_list, be, resume_cursor)
             if last_grab_action is not None:
                 last_grab_box_type = last_grab_action.get('box_type', rp.box_type)
+                last_grab_car_width = rp.W
+                last_grab_block_type = rp.block_type
             logs.warning("===== 断点续传待确认 =====")
             logs.warning(f"将从 block {rp_idx + 1}/{len(rp_list)} 继续，"
                          f"已完成至 box_id≤{cur_box_id}, path_id≤{cur_path_id}")
@@ -883,36 +1008,70 @@ def main():
                 if mes_hex == cmd_chk_path:
                     chk_value = len(rp.robot_offsets) - 1
                     _chk_stamp = time.strftime('%Y%m%d_%H%M%S')
+                    _chk_output_dir = _create_chk_path_output_dir(
+                        _chk_stamp)
                     chk_session = {
                         'stamp': _chk_stamp,
                         'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'output_dir': _chk_output_dir,
                         'results': [],
                         'path_htmls': [],
                         'face_images': [],
                         'system_issues': [],
                         'mixture_fields': _collect_mixture_fields(config_rp),
                     }
+                    _attach_chk_path_log(chk_session, logs)
                     logs.info(
                         f"cmd_chk_path 批量检查开始，当前 Block {rp_idx + 1}，"
-                        f"本 Block 待检查 {chk_value} 抓")
+                        f"本 Block 待检查 {chk_value} 抓，"
+                        f"会话目录={_chk_output_dir}")
                     if chk_value <= 0:
+                        _chk_status = 2
                         try:
                             _empty_summary = _write_chk_path_summary(chk_session)
                             logs.info("cmd_chk_path 当前无待检查路径")
                             _log_chk_path_summary(_empty_summary, logs)
+                            _chk_status = _empty_summary['status']
                         except Exception as _empty_summary_error:
                             logs.warning(
                                 f"cmd_chk_path 空任务汇总保存失败: {_empty_summary_error}")
                         finally:
+                            try:
+                                server.send_message(_build_msg(
+                                    1,
+                                    _data_block(float(_chk_status))
+                                    + b'\x00\x00'))
+                                logs.info(
+                                    f"cmd_chk_path 检查状态已返回："
+                                    f"float {_chk_status}")
+                            except Exception as _chk_send_error:
+                                logs.error(
+                                    f"cmd_chk_path 检查状态发送失败: "
+                                    f"{type(_chk_send_error).__name__}: "
+                                    f"{_chk_send_error}")
+                            _close_chk_path_log(chk_session, logs)
                             chk_session = None
             else:
                 mes_hex = cmd_get_path
             if mes_hex == cmd_get_pallet:
-                # 发送总体信息（3块：垛型参数 + 箱型参数 + 混装 block 位置）
+                # 发送总体信息（固定3块）：
+                #   第1块：垛型参数；第2块：箱型参数；
+                #   第3块：前6个混装 block 序号，按大端float32编码，不足补0.0。
+                mixture_positions_to_send = mixture_block_positions[:6]
+                mixture_position_slots = [
+                    float(position) for position in mixture_positions_to_send
+                ]
+                mixture_position_slots.extend(
+                    [0.0] * (6 - len(mixture_position_slots)))
+                if len(mixture_block_positions) > 6:
+                    logs.warning(
+                        f'混装 block 共 {len(mixture_block_positions)} 个，'
+                        f'cmd_get_pallet 仅发送前6个：'
+                        f'{mixture_positions_to_send}')
                 payload = (
                     _data_block(rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W)
                     + _data_block(rp.l, rp.w, rp.h)
-                    + _data_block(float(mixture_block_position))
+                    + _data_block(*mixture_position_slots)
                     + b'\x00\x00'
                 )
                 server.send_message(_build_msg(3, payload))
@@ -921,7 +1080,7 @@ def main():
                     f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, '
                     f'车厢宽度：{round(rp.W, 2)}, '
                     f'箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}, '
-                    f'混装 block 位置：{mixture_block_position}')
+                    f'混装 block 位置：{mixture_block_positions or "无"}')
             elif mes_hex == cmd_get_per_count:
                 # 发送单面信息
                 pallet_cnt = rp.cal_floor_count()
@@ -940,7 +1099,7 @@ def main():
                                   if rp.boxes else rp.box_type)
                 server.send_message(_build_msg(1, _data_block(
                     float(pallet_cnt), float(_face_box_type), float(_n_per_row)
-                ) + b'\x00\x00'))
+                ) + b'\x00\x00')) 
                 logs.debug(f'单面码垛放置次数：{pallet_cnt}，每行抓数={_n_per_row}')
             elif mes_hex == cmd_get_box:
                 # 单次来料箱子样式（2块：来料配方 + 当前箱型尺寸）
@@ -974,17 +1133,21 @@ def main():
             # 单次路径点
                 if not rp.robot_offsets:
                     logs.warning("robot_offsets 队列已空，无更多路径可发（请重连并重发垛型）")
-                    chk_value = 0   # 退出批量预取，避免空队列死循环
+                    chk_value = 0   # 退出批量检查，避免空队列死循环
                     continue
                 action = rp.robot_offsets.pop(0)
                 if action == 'done':
                     # 正常不应再弹出 done，切换已在 action==2 时提前完成；此处兜底
-                    chk_value = 0   # 同样退出批量预取
+                    chk_value = 0   # 同样退出批量检查
                     continue
                 path_issues = []
                 physical_support = None
+                gripper_wall_clearance = None
                 last_grab_action = action          # 记录当前抓，供随后 cmd_stacking 对齐序号
                 last_grab_box_type = action.get('box_type', rp.box_type)
+                last_grab_car_width = rp.W
+                last_grab_block_type = rp.block_type
+                last_grab_detection_gap = None
                 # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
                 cur_path_id = action['id']
                 if store and not off_line_mode and resume_save:
@@ -995,6 +1158,41 @@ def main():
                 start_time = time.time()
                 obstacles = be.objects
                 boxs = be.to_box(action)
+                # cmd_stacking 在路径下发后才触发，而 be.step 会立即把当前抓
+                # 加入环境（面末还会清空）。因此必须在 step 之前保存当前抓
+                # 所处的真实空缺口。检测使用该宽度筛候选；机器人仍收到理论抓宽。
+                if action['area'] in ('p1', 'p3'):
+                    try:
+                        _opening_right_wall = rp.W
+                        if (action['area'] == 'p1'
+                                and rp.block_type == 'regular'):
+                            _opening_right_wall = rp.W - rp.N2 * rp.l
+                        _opening = be.side_clearance(
+                            action,
+                            left_wall=0,
+                            right_wall=_opening_right_wall,
+                            min_z_overlap=float(
+                                config_be.get('mixture_z_overlap_min', 20.0)),
+                        )
+                        if _opening['blocking']:
+                            raise ValueError(
+                                f"目标区与{len(_opening['blocking'])}个已码箱体重叠")
+                        _opening_width = (
+                            float(_opening['right_start']) -
+                            float(_opening['left_edge']))
+                        if _opening_width <= 0:
+                            raise ValueError(
+                                f"真实缺口宽度无效: {_opening_width:.1f}mm")
+                        last_grab_detection_gap = {
+                            'target_y_mm': float(_opening['left_edge']),
+                            'width_mm': _opening_width,
+                            'left_gap_mm': float(_opening['left_gap']),
+                            'right_gap_mm': float(_opening['right_gap']),
+                        }
+                    except Exception as _opening_error:
+                        logs.warning(
+                            f"[STACK-GAP] Round.{action['id']} "
+                            f"真实缺口计算失败，检测回退理论抓宽: {_opening_error}")
                 # 路径点语义：x0=初始悬停点，x1=过渡点（y向偏移避障），x_app=放箱接近点，x_goal=目标落箱点
                 # size=(L, Y跨度, Z高度+夹爪余量)，仅用于碰撞检测包围盒，不下发给机器人
                 mixture_clearance = None
@@ -1220,6 +1418,45 @@ def main():
                 #  开始验证
                 path = [x0, x1, x_app, x_goal] + extra_goals
                 if chk_session is not None:
+                    if rp.block_type == 'mixture' and action['area'] == 'p1':
+                        try:
+                            gripper_wall_clearance = \
+                                be.mixture_gripper_wall_clearance(
+                                    action, left_wall=0, right_wall=rp.W)
+                            if gripper_wall_clearance['collision']:
+                                _grip_issue = (
+                                    "混装固定手抓与车厢侧壁干涉: "
+                                    f"箱数={gripper_wall_clearance['actual_num']}，"
+                                    f"固定手抓={gripper_wall_clearance['grip_capacity']}箱"
+                                    f"×{gripper_wall_clearance['box_width']:.1f}mm="
+                                    f"{gripper_wall_clearance['gripper_width']:.1f}mm，"
+                                    f"左对齐Y={gripper_wall_clearance['gripper_left']:.1f}mm，"
+                                    f"手抓右端={gripper_wall_clearance['gripper_right']:.1f}mm，"
+                                    f"车宽={gripper_wall_clearance['right_wall']:.1f}mm，"
+                                    f"左侧超出={gripper_wall_clearance['left_overhang']:.1f}mm，"
+                                    f"右侧超出={gripper_wall_clearance['right_overhang']:.1f}mm")
+                                path_issues.append(_grip_issue)
+                                logs.warning(
+                                    f"[CHK-GRIP-WALL] Round.{action['id']} "
+                                    f"{_grip_issue}")
+                            else:
+                                logs.info(
+                                    f"[CHK-GRIP-WALL] Round.{action['id']} "
+                                    f"固定{gripper_wall_clearance['grip_capacity']}箱手抓"
+                                    f"车壁间隙正常："
+                                    f"Y=[{gripper_wall_clearance['gripper_left']:.1f},"
+                                    f"{gripper_wall_clearance['gripper_right']:.1f}]mm")
+                        except Exception as _grip_wall_error:
+                            _issue = (
+                                f"混装固定手抓车壁检查执行失败: "
+                                f"{_grip_wall_error}")
+                            path_issues.append(_issue)
+                            chk_session['system_issues'].append(
+                                f"Block {rp_idx + 1} / 面 {action['num_F']} / "
+                                f"第 {action['id']} 抓: {_issue}")
+                            logs.warning(
+                                f"[CHK-GRIP-WALL] Round.{action['id']} "
+                                f"{_issue}")
                     try:
                         _continuous_safe, _continuous_detail = \
                             be.trajectory_collision_free(
@@ -1244,8 +1481,8 @@ def main():
                                  ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
                                  if extra_goals else ""))
                     # 混装面物理支撑分析只提示和记录，不阻断路径下发。
-                    # 使用当前抓之前已经写入 BinEnv 的真实箱体，检查底面支撑率、
-                    # 单箱最低支撑率以及单箱中心是否落在支撑面内。
+                    # 使用当前抓之前已经写入 BinEnv 的真实箱体，检查底面支撑率，
+                    # 并判断单箱重心是否落在全部接触面的联合支撑凸包内。
                     if rp.block_type == 'mixture' and action['area'] == 'p1':
                         try:
                             physical_support = be.analyze_mixture_support(action)
@@ -1254,7 +1491,7 @@ def main():
                                 risk_name = (
                                     '完全悬空'
                                     if physical_support['risk_level'] == 'floating'
-                                    else '支撑面积不足')
+                                    else '重心未落在联合支撑区')
                                 risk_boxes = physical_support['risk_box_indices']
                                 issue_text = (
                                     f"混装物理结构风险({risk_name}): "
@@ -1272,7 +1509,9 @@ def main():
                                     f"[CHK-SUPPORT] Round.{action['id']} 支撑正常："
                                     f"整抓={physical_support['support_ratio'] * 100:.1f}%，"
                                     f"最低单箱="
-                                    f"{physical_support['min_box_support_ratio'] * 100:.1f}%")
+                                    f"{physical_support['min_box_support_ratio'] * 100:.1f}%，"
+                                    f"方式="
+                                    f"{[item['support_mode'] for item in physical_support['per_box']]}")
                         except Exception as _support_error:
                             issue_text = (
                                 f"混装物理支撑分析失败: {_support_error}")
@@ -1336,13 +1575,15 @@ def main():
                                     if a['pos'][1] >= y_grip_right]
                                 p1_left_wall = 0
                                 p1_right_wall = rp.W - rp.N2 * rp.l
-                                y_placed_right = (
-                                    y_grip_right + sum(action.get('gaps', [])))
+                                # 与垛型生成 dir 的口径保持一致：左右距离按当前抓
+                                # 尚未开缝时的手抓占宽计算，不把当前抓 gaps 计入
+                                # 右边界。已经放置的箱体仍使用 _phys_right，保留
+                                # 它们开缝后的实际物理边界。
                                 left_gap = (y_start - max(left_ends)
                                             if left_ends else y_start - p1_left_wall)
                                 right_gap = (min(right_starts) - y_grip_right
                                              if right_starts
-                                             else p1_right_wall - y_placed_right)
+                                             else p1_right_wall - y_grip_right)
                                 left_src = '箱' if left_ends else '墙'
                                 right_src = '箱' if right_starts else '墙'
                                 has_side_reference = bool(left_ends or right_starts)
@@ -1397,26 +1638,43 @@ def main():
                         'cost_sec': round(end_time - start_time, 4),
                         'issues': list(dict.fromkeys(path_issues)),
                         'physical_support': physical_support,
+                        'gripper_wall_clearance': gripper_wall_clearance,
                     }
                     chk_session['results'].append(chk_result)
 
-                # 发送路径数据：每个路径点编码为41字节块
-                # 中间点 flag = 区域码，末点 flag = 动作码
-                # action=2 表示当前 block 最后一抓
-                # 若已是最后一个 block 发 3（全部结束）
-                act_val = action['action']
-                path_payload = b''.join(
-                    b'\x01\x00\x00\x00\x00'
-                    + struct.pack('!fff', round(pt[0], 2), round(pt[1], 2), round(pt[2], 2))
-                    + b'\x00' * 24
-                    for pt in path
-                )
-                info_block = _data_block(
-                    float(_AREA_NUM[action['area']]),
-                    float(act_val),
-                    float(action['num'][0]),
-                )
-                server.send_message(_build_msg(len(path) + 1, path_payload + info_block + b'\x00\x00'))
+                # 普通 cmd_get_path 才发送当前抓路径。cmd_chk_path 只在服务端
+                # 内部批量检查并保存结果，期间不发送单抓数据，避免机器人接收端
+                # 的最终整体状态被前面的路径响应覆盖。
+                if chk_session is None:
+                    # 路径点块：index=1 + class_id + XYZ；末尾信息块的
+                    # 3个float依次为区域码、动作码和本抓第一段箱数。
+                    act_val = action['action']
+                    # 仅第一个路径点块携带校验结果：未开启校验=0，
+                    # 校验通过=1，校验失败=2；其余块保持0。
+                    path_class_id = 0
+                    if config_be['chk_enable']:
+                        path_class_id = 2 if path_issues else 1
+                        logs.info(
+                            f"Round.{action['id']} 路径校验结果："
+                            f"class_id={path_class_id}"
+                            f"（{'失败' if path_class_id == 2 else '通过'}）")
+                    path_payload = b''.join(
+                        b'\x01'
+                        + (path_class_id if pt_index == 0 else 0).to_bytes(4, 'big')
+                        + struct.pack(
+                            '!fff', round(pt[0], 2),
+                            round(pt[1], 2), round(pt[2], 2))
+                        + b'\x00' * 24
+                        for pt_index, pt in enumerate(path)
+                    )
+                    info_block = _data_block(
+                        float(_AREA_NUM[action['area']]),
+                        float(act_val),
+                        float(action['num'][0]),
+                    )
+                    server.send_message(_build_msg(
+                        len(path) + 1,
+                        path_payload + info_block + b'\x00\x00'))
     
                 # 正常任务由 show_env 控制单抓 HTML；cmd_chk_path 检查混装面时
                 # 即使 show_env=false 也必须逐抓保存，便于定位混装路径异常。
@@ -1429,7 +1687,10 @@ def main():
                         ts = time.strftime("%Y%m%d_%H%M%S")
                         plot = Plot(
                             f"path_block{rp_idx + 1:02d}_face{action['num_F']:02d}_"
-                            f"{ts}_id{action['id']}")
+                            f"{ts}_id{action['id']}",
+                            output_dir=(
+                                chk_session.get('output_dir')
+                                if chk_session is not None else None))
                         # Plot 方法只用 X.dimensions，可视化无需 rtree，用轻量对象代替
                         _X3 = type('_X', (), {'dimensions': 3})()
                         if path is not None:
@@ -1477,6 +1738,9 @@ def main():
                             issue_ids=_face_issue_ids,
                             save_face=True,
                             save_mixture=(rp.block_type == 'mixture'),
+                            output_dir=(
+                                chk_session.get('output_dir')
+                                if chk_session is not None else None),
                         )
                         if chk_session is not None:
                             chk_session['face_images'].extend(_saved_images)
@@ -1507,7 +1771,7 @@ def main():
                         cur_box_id = cur_path_id = 0
                         if store and not off_line_mode and resume_save:
                             store.save_cursor(rp_idx, cur_box_id, cur_path_id)
-                        # chk_value > 0 说明当前处于批量预取模式，继续对新 block 批量处理
+                        # chk_value > 0 说明当前处于批量检查模式，继续检查新 block
                         if chk_value > 0:
                             # len-1 排除末尾 'done'，+1 补偿本次循环末尾的 chk_value-=1
                             chk_value = len(rp.robot_offsets) - 1 + 1
@@ -1524,19 +1788,41 @@ def main():
                 if chk_value != 0:
                     chk_value -= 1
                     if chk_value == 0 and chk_session is not None:
+                        _chk_status = 2
                         try:
                             _chk_summary = _write_chk_path_summary(chk_session)
                             _log_chk_path_summary(_chk_summary, logs)
+                            _chk_status = _chk_summary['status']
                         except Exception as _chk_summary_error:
                             logs.warning(
                                 f"cmd_chk_path 汇总保存失败，仅保留运行日志: "
                                 f"{_chk_summary_error}")
                         finally:
+                            try:
+                                server.send_message(_build_msg(
+                                    1,
+                                    _data_block(float(_chk_status))
+                                    + b'\x00\x00'))
+                                logs.info(
+                                    f"cmd_chk_path 检查状态已返回："
+                                    f"float {_chk_status}")
+                            except Exception as _chk_send_error:
+                                logs.error(
+                                    f"cmd_chk_path 检查状态发送失败: "
+                                    f"{type(_chk_send_error).__name__}: "
+                                    f"{_chk_send_error}")
+                            _close_chk_path_log(chk_session, logs)
                             chk_session = None
             elif mes_hex == cmd_stacking:
                 # 双雷达采集 → 堆叠检测 → 发送结果 → 保存点云（分段计时）
                 pc1 = pc2 = None
                 t_collect = t_compute = t_save = 0.0
+                measured = None
+                _grab_width = 0.0
+                _stacking_status = 2
+                _stacking_saved_path = None
+                _stacking_pcd_name = (
+                    f"merged_{time.strftime('%Y%m%d_%H%M%S')}.pcd")
                 try:
                     # 当前抓箱子总宽度：箱数 × 单箱宽（p3侧立时宽度方向为h=size[2]，p1为w=size[1]）
                     # 用 last_grab_action 自带的 size/箱型（多 block 边界后 rp 已切换，不能用 rp.w/h/box_type）
@@ -1544,6 +1830,12 @@ def main():
                     _rel_top_h = None    # 当前行顶面距地板高度(米)，供测宽锁定当前行 Z
                     _box_h_m = None      # 当前抓箱子竖向高度(米)
                     _single_box_width = None  # 当前姿态下单箱沿垛面宽度方向的尺寸(mm)
+                    _target_y_mm = None  # 当前抓订单车宽方向起点，供混装阶梯缺口定位
+                    _detection_width_mm = None
+                    _detection_target_y_mm = None
+                    _car_width_mm = None
+                    _stair_step_mode = False
+                    _cur = None
                     if last_grab_action is None or last_grab_action == 'done':
                         _grab_width = -1
                         _box_type = (rp.robot_offsets[0].get('box_type', rp.box_type)
@@ -1556,11 +1848,39 @@ def main():
                             _cur['size'][2] if _cur['area'] == 'p3' else _cur['size'][1])
                         _grab_width = _n * _single_box_width
                         _box_type = last_grab_box_type
+                        _target_y_mm = _cur['pos'][1]
+                        if last_grab_detection_gap is not None:
+                            _detection_width_mm = (
+                                last_grab_detection_gap['width_mm'])
+                            _detection_target_y_mm = (
+                                last_grab_detection_gap['target_y_mm'])
+                        _car_width_mm = last_grab_car_width
+                        _stair_step_mode = (
+                            last_grab_block_type == 'mixture')
                         # 当前行高度：pos[2] 为放置点底面距地板高度(mm)，加箱竖向跨度=顶面相对高度
                         # p3 侧立时竖向跨度为原始宽 size[1]，p1 竖放时为原始高 size[2]
                         _box_vspan = _cur['size'][1] if _cur['area'] == 'p3' else _cur['size'][2]
                         _rel_top_h = (_cur['pos'][2] + _box_vspan) / 1000.0
                         _box_h_m = _box_vspan / 1000.0
+                    # 偏航补偿角：由该抓所属 block 箱型对应的拍照位 J1
+                    # 与正对 J1 之差决定。采集前记录可直接复制的离线回放调用。
+                    _yaw_off = _yaw_offset_for_box(_box_type)
+                    logs.info(
+                        "[STACK-TASK] 离线回放代码：\n"
+                        + _format_stacking_replay_call(
+                            _stacking_pcd_name,
+                            yaw_offset_deg=_yaw_off,
+                            rel_top_h=_rel_top_h,
+                            box_h=_box_h_m,
+                            expected_width_mm=_grab_width,
+                            box_width_mm=_single_box_width,
+                            box_type=_box_type,
+                            target_y_mm=_target_y_mm,
+                            car_width_mm=_car_width_mm,
+                            stair_step_mode=_stair_step_mode,
+                            detection_width_mm=_detection_width_mm,
+                            detection_target_y_mm=_detection_target_y_mm,
+                        ))
                     _t0 = time.time()
                     pc1, pc2 = collect_dual_lidar_once('/lidar/JT128_1', '/lidar/JT128_2', frames=3)
                     t_collect = time.time() - _t0
@@ -1573,13 +1893,16 @@ def main():
                         measured = None
                     else:
                         _t1 = time.time()
-                        # 偏航补偿角：由该抓所属 block 箱型对应的拍照位 J1 与正对 J1 之差决定
-                        _yaw_off = _yaw_offset_for_box(_box_type)
                         measured = check_stacking(_grab_width, pc1, pc2, yaw_offset_deg=_yaw_off,
                                                   rel_top_h=_rel_top_h, box_h=_box_h_m,
                                                   box_width_mm=_single_box_width,
                                                   log_callback=logs.warning, view=False,
-                                                  box_type=_box_type)
+                                                  box_type=_box_type,
+                                                  target_y_mm=_target_y_mm,
+                                                  car_width_mm=_car_width_mm,
+                                                  stair_step_mode=_stair_step_mode,
+                                                  detection_width_mm=_detection_width_mm,
+                                                  detection_target_y_mm=_detection_target_y_mm)
                         t_compute = time.time() - _t1
                         if measured is None:
                             # 宽度计算失败：发送 status=2（不再依赖异常兜底）
@@ -1589,6 +1912,7 @@ def main():
                         else:
                             server.send_message(_build_msg(
                                 1, _data_block(1.0, float(_grab_width), float(measured)) + b'\x00\x00'))
+                            _stacking_status = 1
                             logs.info(f'堆叠检测：计算成功，理论宽度={_grab_width:.1f}mm，'
                                       f'测量宽度={measured:.1f}mm，发送 status=1')
                 except Exception as _e:
@@ -1601,10 +1925,32 @@ def main():
                 if pc1 is not None and pc2 is not None:
                     try:
                         _t2 = time.time()
-                        save_point_clouds(pc1, pc2)
+                        _stacking_saved_path = save_point_clouds(
+                            pc1, pc2, file_name=_stacking_pcd_name)
                         t_save = time.time() - _t2
+                        logs.info(
+                            f"[STACK-TASK] 点云保存成功："
+                            f"pcd_name={_stacking_pcd_name}，"
+                            f"path={_stacking_saved_path}")
                     except Exception as _e:
                         logs.error(f'点云保存异常：{type(_e).__name__}: {_e}')
+                _stacking_result = {
+                    'pcd_name': _stacking_pcd_name,
+                    'pcd_saved': _stacking_saved_path is not None,
+                    'status': int(_stacking_status),
+                    'expected_width_mm': float(_grab_width),
+                    'measured_width_mm': (
+                        None if measured is None else float(measured)),
+                    'collect_seconds': round(t_collect, 3),
+                    'compute_seconds': round(t_compute, 3),
+                    'save_seconds': round(t_save, 3),
+                }
+                logs.info(
+                    "[STACK-TASK] 完成结果="
+                    + json.dumps(
+                        _stacking_result,
+                        ensure_ascii=False,
+                        separators=(',', ':')))
                 logs.info(f'cmd_stacking 耗时：采集拼接={t_collect:.2f}s '
                           f'计算={t_compute:.2f}s 保存={t_save:.2f}s '
                           f'总={t_collect + t_compute + t_save:.2f}s')

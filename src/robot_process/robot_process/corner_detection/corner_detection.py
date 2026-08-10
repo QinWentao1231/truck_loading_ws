@@ -927,17 +927,46 @@ def _process_point_cloud_impl(pcd, method):
         rib_points = np.empty((0, 3))
         mixture_outer_points = np.empty((0, 3))
         if method == 1:
-            # 车头加强筋：用法向滤波后(未经统计滤波删除)的全部前面点，
-            # 取最凸向货舱的 _RIB_PCT% 分位均值作筋深，再夹在 [_FRONT_RIB_MIN, _FRONT_RIB_MAX]
+            # 车头加强筋必须使用二次统计滤波后的前面点。过滤前的
+            # front_points 在车头/地面交界处会混入法向误判的地面点，
+            # 这些点相对车头主平面的残差可达数百毫米，会把补偿拉到上限。
+            # 同时只允许主平面前后 _FRONT_RIB_MAX 范围内的点参与分位计算，
+            # 防止残留的非车头结构再次污染筋深。
             n_main = np.array([a, b, c]) / np.linalg.norm([a, b, c])
-            all_dist = front_points @ n_main + d
-            thr = np.percentile(all_dist, _RIB_PCT)
-            rib_points = front_points[all_dist <= thr]   # 被判为筋的最凸 _RIB_PCT% 点
-            delta = float(min(all_dist[all_dist <= thr].mean(), 0))
-            delta_eff = max(-_FRONT_RIB_MAX, min(delta, -_FRONT_RIB_MIN))
-            i_model = [a, b, c, d - delta_eff]
-            print(f'车头筋补偿：检测 delta={delta*1000:.1f}mm, 实际采用={-delta_eff*1000:.1f}mm, '
-                  f'筋点数={len(rib_points)}')
+            rib_source_points = np.asarray(front_pcd.points)
+            all_dist = rib_source_points @ n_main + d
+            valid_depth_mask = (
+                np.isfinite(all_dist) &
+                (all_dist >= -_FRONT_RIB_MAX) &
+                (all_dist <= _FRONT_RIB_MAX))
+            valid_dist = all_dist[valid_depth_mask]
+            rejected_count = len(all_dist) - len(valid_dist)
+            if len(valid_dist) < MIN_PLANE_CANDIDATE_POINTS:
+                i_model = [a, b, c, d]
+                print(
+                    f'车头筋补偿：有效候选不足，跳过补偿 '
+                    f'({len(valid_dist)} < {MIN_PLANE_CANDIDATE_POINTS}, '
+                    f'剔除异常点={rejected_count})')
+            else:
+                thr = np.percentile(valid_dist, _RIB_PCT)
+                rib_mask = valid_depth_mask & (all_dist <= thr)
+                rib_points = rib_source_points[rib_mask]
+                delta = float(min(all_dist[rib_mask].mean(), 0))
+                if delta >= 0:
+                    i_model = [a, b, c, d]
+                    print(
+                        f'车头筋补偿：未检测到主平面前方筋点，跳过补偿 '
+                        f'(剔除异常点={rejected_count})')
+                else:
+                    delta_eff = max(
+                        -_FRONT_RIB_MAX,
+                        min(delta, -_FRONT_RIB_MIN))
+                    i_model = [a, b, c, d - delta_eff]
+                    print(
+                        f'车头筋补偿：检测 delta={delta*1000:.1f}mm, '
+                        f'实际采用={-delta_eff*1000:.1f}mm, '
+                        f'筋点数={len(rib_points)}, '
+                        f'剔除异常点={rejected_count}')
         elif method == 6:
             i_model, mixture_outer_points, _ = (
                 select_outermost_mixture_front(
@@ -1656,6 +1685,6 @@ def process_point_cloud(pcd, method):
 
 if __name__ == '__main__':
     file_path = ("/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
-                 "pcd_logs/0716/trun_cloud_20260716_101157_slow1.pcd")
+                 "pcd_logs/0729/XT0729.pcd")
     pcd = o3d.io.read_point_cloud(file_path)
-    process_point_cloud(pcd, 2)
+    process_point_cloud(pcd, 1)
