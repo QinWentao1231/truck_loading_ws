@@ -26,18 +26,19 @@ message Regular{
     int32 T3 = 5; // P3高度行数
     int32 F13 = 6; // P1P3面数
     int32 F2 = 7; // P2面数
-    int32 E = 8; // 尾料堆放形式(0 无，1 P1前置，2 P3顶置)
+    int32 E = 8; // 尾料形式：0无，1前置P1，2顶置P3，3顶置P1
     int32 Nx = 9; // 尾料个数
     repeated Stack Stack = 10; // 堆叠缝隙排布
     repeated Group Group = 11; // 堆叠按爪分组
     string Type = 12; // 箱型代号
 }
 
-// 混装面(面数固定为1，全P1堆放，下方箱体为前垛收尾，上方箱体为后垛开头)
+// 混装面：Block.mixture 的全部条目共同组成一个面，按列表顺序逐抓放置。
+// 默认按P1放置；仅1XX箱型可用 Num>=10 编码P3侧立，个位数为真实箱数。
 
 message Mixture{
     string Type = 1; // 箱型代号
-    int32 Num = 2; // 箱型数量
+    int32 Num = 2; // 来料数量；1XX的P3侧立使用“10+真实箱数”编码
     Position Pos = 3; // 左下前角点位置坐标
 }
 

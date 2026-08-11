@@ -3,7 +3,8 @@
 设计要点：
   - 计划确定性：RobotPosition 由 config_rp 完全决定，重启重建即可，无需存中间状态。
   - JSON 纯文本：plan/cursor 都是 JSON，可直接打开查看，无 pickle 安全风险。
-  - 原子写：写临时文件 → fsync 落盘 → os.replace 原子替换，断电不会写出半截文件。
+  - 原子替换：写临时文件 → fsync 文件 → os.replace，避免读取到半截 JSON。
+    当前未对父目录执行 fsync，因此不承诺最新目录项在突然掉电后一定持久。
   - plan_hash 校验：游标与计划指纹绑定（json sort_keys 确定性），换了垛型则拒绝续传。
   - 先存后发：节点在「发送某抓前」先更新游标，断电宁可漏一抓也不重码（防碰撞）。
 """
@@ -29,7 +30,7 @@ def resolve_resume_dir(file_path):
 
 
 def _atomic_write_bytes(path, data):
-    """原子写：临时文件 + fsync + os.replace，保证断电不丢/不半截。"""
+    """先同步临时文件再原子替换目标，避免其他读者看到半截文件。"""
     tmp = path + '.tmp'
     with open(tmp, 'wb') as f:
         f.write(data)
@@ -39,8 +40,10 @@ def _atomic_write_bytes(path, data):
 
 
 class ResumeStore:
+    """以计划文件和进度游标文件维护可恢复的码垛状态。"""
 
     def __init__(self, base_dir, logger=None):
+        """初始化存储路径；目录创建失败只告警，不中断主流程。"""
         self.dir = base_dir
         self.log = logger
         try:
@@ -60,7 +63,8 @@ class ResumeStore:
 
     @staticmethod
     def plan_hash(config_rp):
-        # sort_keys 保证跨运行确定性
+        """返回规范化计划 JSON 的短指纹，用于拒绝错配游标。"""
+        # sort_keys 保证同一计划跨运行得到稳定序列。
         blob = json.dumps(config_rp, sort_keys=True, ensure_ascii=False).encode('utf-8')
         return hashlib.md5(blob).hexdigest()[:12]
 

@@ -1,3 +1,10 @@
+"""双雷达垛面宽度与箱体倾斜检测。
+
+在线入口先采集两路 PointCloud2，再进行偏航补偿、当前面/当前层裁剪、候选侧面
+配对和缺口占用复核。模块内部点云单位为米，对外测量结果单位为毫米；检测失败
+统一返回 ``None``，由主节点转换为机器人协议状态。
+"""
+
 import copy
 import os
 import open3d as o3d
@@ -16,6 +23,7 @@ DEBUG = False
 _VISUALIZATION_BACKEND_READY = False
 
 def _dbg(msg):
+    """仅在 ``DEBUG`` 开启时输出离线诊断信息。"""
     if DEBUG:
         print(msg)
 
@@ -176,8 +184,8 @@ DBSCAN_EPS = 0.15                # 邻域半径(米)：从0.2降到0.15，提高
 DBSCAN_MIN_POINTS = 8            # 成簇最少点数：从10降到8，保持敏感度
 
 # ── 簇筛选与左右配对 ──
-MIN_CLUSTER_PTS = 10             # 簇最小点数：15 能保住更稀疏的第一层箱面，又能过滤孤立噪点
-MIN_CLUSTER_ZSPAN_M = 0.02       # 簇最小 z 跨度(米)：0.10 过滤顶部薄片(<0.08)，保住稀疏第一层(0.1-0.4)
+MIN_CLUSTER_PTS = 10             # 候选簇至少10点，兼顾稀疏侧面与孤立噪点过滤
+MIN_CLUSTER_ZSPAN_M = 0.02       # 候选簇至少20mm高，排除近似水平的薄片噪声
 MAX_CLUSTER_CZ_M = 1.0           # 簇 z 重心上限(米)：> 此值视为车厢顶部凸起结构(管线/灯)，丢弃
 
 # ── 候选面之间的箱体占用检查 ──
@@ -282,6 +290,7 @@ VIEW_FRONT_Y = 4.0               # 原始点云仅显示雷达前方此距离(�
 
 
 class DualLidarOneShot(Node):
+    """累计两路雷达的固定帧数，并分别合并为单次检测点云。"""
 
     def __init__(
         self,
@@ -289,6 +298,7 @@ class DualLidarOneShot(Node):
         topic2='/lidar_points2',
         max_frames=LIDAR_FRAMES
     ):
+        """创建两个点云订阅；当两侧均达到 ``max_frames`` 时置完成标志。"""
         super().__init__('dual_lidar_oneshot')
 
         self.max_frames = max_frames
@@ -315,6 +325,7 @@ class DualLidarOneShot(Node):
         )
 
     def cb1(self, msg: PointCloud2):
+        """接收雷达1点云并尝试完成本次采集。"""
         if self.count1 >= self.max_frames:
             return
 
@@ -332,6 +343,7 @@ class DualLidarOneShot(Node):
         self.try_finish()
 
     def cb2(self, msg: PointCloud2):
+        """接收雷达2点云并尝试完成本次采集。"""
         if self.count2 >= self.max_frames:
             return
 
@@ -349,6 +361,7 @@ class DualLidarOneShot(Node):
         self.try_finish()
 
     def try_finish(self):
+        """两路帧数均满足要求时合并帧并标记采集完成。"""
         if (
             self.count1 >= self.max_frames
             and self.count2 >= self.max_frames
@@ -366,6 +379,7 @@ class DualLidarOneShot(Node):
 
     @staticmethod
     def msg_to_np(msg: PointCloud2):
+        """将 ROS PointCloud2 向量化转换为有限 XYZ 数组。"""
         # 向量化解析：直接从 structured array 提取 xyz 三列，避免 Python 逐点迭代
         data = point_cloud2.read_points(msg, ('x', 'y', 'z'), skip_nans=True)
         if data.size == 0:
@@ -404,17 +418,7 @@ def collect_dual_lidar_once(
     return pc1, pc2
 
 def segment_plane(pcd, distance_threshold=0.001, ransac_n=3, num_iterations=100000):
-    """
-    分割点云中的平面并在原始点云上以不同颜色标记显示。
-    Args:
-        pcd: Open3D 点云对象
-        distance_threshold: RANSAC 的距离阈值
-        ransac_n: RANSAC 拟合平面所需的最小点数
-        num_iterations: RANSAC 的迭代次数
-    Returns:
-        planes: 分割出的平面点云列表
-        remaining_cloud: 剩余点云
-    """
+    """RANSAC 分割主平面，返回 ``(模型, 内点云, 外点云)``。"""
     plane_model, inliers = pcd.segment_plane(
         distance_threshold=distance_threshold,
         ransac_n=ransac_n,
@@ -426,14 +430,7 @@ def segment_plane(pcd, distance_threshold=0.001, ransac_n=3, num_iterations=1000
 
 
 def show_plane(model, color):
-    """
-    平面拟合可视化。
-    Args:
-        model: 平面方程
-        color: 绘制颜色
-    Returns:
-        plane_mesh: Open3D Box对象
-    """
+    """把 ``ax+by+cz+d=0`` 绘制为指定颜色的薄盒网格。"""
     normal = np.array([model[0], model[1], model[2]])
     # 计算平面法向量的旋转
     initial_normal = np.array([0, 0, 1])  # 初始法向量是 Z 轴方向
@@ -461,13 +458,7 @@ def show_plane(model, color):
 
 
 def intersection_of_planes(plane1, plane2, plane3):
-    """
-    拟合三个平面的交点。
-    Args:
-        plane1, plane2, plane3: 平面方程
-    Returns:
-        intersection_point: 交点
-    """
+    """求三个平面方程的唯一交点。"""
     # 解线性方程组 Ax = b，求解三个平面的交点
     A = np.array([
         [plane1[0], plane1[1], plane1[2]],
@@ -481,14 +472,7 @@ def intersection_of_planes(plane1, plane2, plane3):
 
 
 def matrix2euler(r):
-    """
-    旋转矩阵转欧拉角xyzwpr。
-    Args:
-        r: 4*4旋转矩阵
-    Returns:
-        xyzwpr
-    """
-    # 确保传入的是3x3旋转矩阵
+    """将 4×4 位姿矩阵转换为 ``[x,y,z,roll,pitch,yaw]``（角度制）。"""
     assert r.shape == (4, 4)
     # 计算欧拉角 (ZYX 顺序)
     yaw = np.arctan2(r[1, 0], r[0, 0])  # z轴旋转
@@ -498,13 +482,12 @@ def matrix2euler(r):
 
 
 def point_to_plane_distance(point, a, b, c, d):
-    # 计算点到平面的符号
+    """返回点代入平面方程后的未归一化有符号值（兼容旧工具）。"""
     return a * point[0] + b * point[1] + c * point[2] + d
 
 
 def fiterCloud(pcd):
-    # vox_pcd = pcd
-    # vox_pcd = pcd.voxel_down_sample(voxel_size=0.005)
+    """执行统计离群点过滤；函数名保留旧接口拼写。"""
     down_pcd = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)[0]
     return down_pcd
 
@@ -512,6 +495,7 @@ def fiterCloud(pcd):
 view = VIEW  # 兼容旧函数(clustFrontBoard)的小写开关，统一跟随 VIEW
 
 def clustFrontBoard(pcd):
+    """按 DBSCAN 把旧版 L 形前板分成两组平面并返回模型及 Y 跨度。"""
     labels = np.array(pcd.cluster_dbscan(eps=0.03, min_points=10))
     unique_labels, counts = np.unique(labels, return_counts=True)
     label_count_dict = dict(zip(unique_labels, counts))
@@ -553,7 +537,6 @@ def clustFrontBoard(pcd):
     merged_points = selected_clusters[0]
     for cloud in selected_clusters[1:]:
         merged_points += cloud
-    # merged_points.paint_uniform_color([1, 1, 0])
     other_points = other_clusters[0]
     for cloud in other_clusters[1:]:
         other_points += cloud
@@ -583,17 +566,13 @@ def clustFrontBoard(pcd):
     other_plane_model, _, _ = segment_plane(other_points)
     aabb = other_points.get_axis_aligned_bounding_box()
     bounding_box_other = aabb.get_extent()
-    # final_plane_model[3] = -d_array.min()
-
     return [[final_plane_model[0], final_plane_model[1], final_plane_model[2], final_plane_model[3],
              bounding_box_final[1]],
             [other_plane_model[0], other_plane_model[1], other_plane_model[2], other_plane_model[3],
              bounding_box_other[1]]]
 
 def point_to_plane_distance(x, y, z, a, b, c, d):
-    """
-    计算点 (x, y, z) 到平面 ax + by + cz + d = 0 的有符号距离
-    """
+    """计算点到平面 ``ax+by+cz+d=0`` 的绝对欧氏距离。"""
     numerator = a * x + b * y + c * z + d
     denominator = math.sqrt(a * a + b * b + c * c)
 
@@ -603,30 +582,23 @@ def point_to_plane_distance(x, y, z, a, b, c, d):
     return abs(numerator / denominator)
 
 def stitching_pcd(pcd1, pcd2, angle):
-    # 假设你有一个变换矩阵，将第二个点云转换到第一个点云的坐标系下
-    # 这里我们用一个简单的旋转和位移矩阵作为示例
-    # 变换矩阵形式为 4x4 矩阵，其中前三列为旋转矩阵，第四列为平移向量
+    """旧版点云拼接演示：使用固定示例变换并显示结果。
+
+    ``angle`` 当前未参与计算；在线双雷达检测不调用该函数。
+    """
     transformation_matrix = np.array([[0.866, -0.5, 0, 1],
                                     [0.5, 0.866, 0, 2],
                                     [0, 0, 1, 3],
                                     [0, 0, 0, 1]])
 
-    # 应用变换矩阵到第二个点云
     pcd2.transform(transformation_matrix)
-
-    # 合并两个点云
     combined_pcd = pcd1 + pcd2
-
-    # 可视化合并后的点云
     _show_geometries("Stitched point cloud", [combined_pcd])
 
 def rotation_pcd(matrix, pcd):
-    """
-    生成绕X轴、Y轴、Z轴旋转的合成旋转矩阵。
-    参数:
-    roll -- 绕X轴旋转的角度（弧度）
-    pitch -- 绕Y轴旋转的角度（弧度）
-    yaw -- 绕Z轴旋转的角度（弧度）
+    """按 ``[x,y,z,roll,pitch,yaw]`` 变换点云并原位返回。
+
+    平移单位跟随点云，三个角度输入为度；旋转顺序为 ``Rz @ Ry @ Rx``。
     """
     translation_vector = np.array([matrix[0], matrix[1], matrix[2]])  # 例如：平移 (1, 2, 3)
     roll = math.radians(matrix[3])
@@ -661,6 +633,7 @@ def rotation_pcd(matrix, pcd):
     return pcd
 
 def valid_pcd(pcd):
+    """原位删除包含 NaN/Inf 的点并返回同一个点云对象。"""
     pts = np.asarray(pcd.points)
     # 掩码：去掉 NaN、inf
     mask = np.isfinite(pts).all(axis=1)
@@ -1088,6 +1061,7 @@ def _build_tilt_2d_image(binary_image, edge_image, result, z_min, z_max):
     line_colors = ((30, 45, 255), (0, 220, 255))  # OpenCV BGR：红、黄
 
     def to_canvas(pixel_x, pixel_z):
+        """把 U-Z 投影像素换算到带边距、Z向上显示的画布坐标。"""
         return (
             int(round(margin_left + float(pixel_x) * scale)),
             int(round(margin_top +
@@ -1395,6 +1369,7 @@ def _detect_tilted_box(pts, actual_top_z, box_h, view=False):
         line_v = _supporting_line_v(front_pts, frame, p0_uz, p1_uz)
 
         def to_xyz(point_uz):
+            """把局部 U-Z 线端点恢复到雷达 XYZ 坐标。"""
             xy = (frame['origin_xy'] + point_uz[0] * frame['u_axis'] +
                   line_v * frame['v_axis'])
             return np.array([xy[0], xy[1], point_uz[1]], dtype=float)
@@ -1670,6 +1645,7 @@ def _add_missing_order_edge_candidate(
     )
 
     def _is_reliable_order_edge(candidate):
+        """按点数和当前层有效高度判断候选边界能否覆盖虚拟边界。"""
         points = np.asarray(candidate.get('pts', ()))
         point_count = len(points)
         z_span = (
@@ -1700,6 +1676,7 @@ def _add_missing_order_edge_candidate(
         return reliable
 
     def _nearest(edge_x):
+        """返回距订单边界最近的可靠候选及其绝对误差。"""
         reliable_candidates = [
             candidate for candidate in candidates
             if _is_reliable_order_edge(candidate)
@@ -1882,6 +1859,7 @@ def _add_front_gap_edge_candidates(
     )
 
     def _already_found(edge_x):
+        """判断订单边界附近是否已有高度和点数均可靠的候选。"""
         for candidate in candidates:
             points = np.asarray(candidate.get('pts', ()))
             if (points.ndim != 2 or points.shape[1] < 3 or
@@ -2038,6 +2016,7 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             _dbg(f"{tilt_message_base}；倾斜外侧候选面生成失败，继续用常规候选面复核")
 
     def _report_tilt_result(success, detail):
+        """统一输出倾斜候选复核后的最终状态，并安全调用外部日志回调。"""
         if tilt_message_base is None:
             return
         message = (
@@ -2607,7 +2586,7 @@ def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0,
     """测量堆叠宽度，返回 measured_mm（计算成功）或 None（计算失败/报错）。
     length 为当前抓理论总宽度；box_width_mm 为当前姿态下单箱宽度。
     两候选面间距只有落在检测参考宽度 ± 1.5×box_width_mm 范围内才算有效；
-    tolerance 保留兼容旧调用。
+    tolerance 仅保留旧调用签名，当前候选范围由内部箱宽倍数规则决定，不参与计算。
     yaw_offset_deg: 拍照位相对正对的偏航角(度)，用于点云偏航补偿。
     rel_top_h / box_h: 当前抓顶面距地板高度和箱子竖向高度(米)，用于把测宽锁定到当前行。
     log_callback: 倾斜检出及二次复核日志回调。倾斜外侧候选能组成有效空缺口时

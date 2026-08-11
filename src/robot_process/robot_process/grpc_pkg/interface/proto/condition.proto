@@ -1,62 +1,62 @@
 syntax = "proto3";
 
-// ÔËµ¥Ìõ¼ş×Ü°ü
+// è¿å•è¾“å…¥æ¡ä»¶æ€»åŒ…ã€‚
 message Condition{
-    CarCondition car = 1; // ³µÁ¾Ìõ¼ş
-    repeated OrderCondition orders = 2; // ³ö¿âµ¥Ìõ¼ş
-    Limitation limit = 3; // ÔËµ¥ÏŞÖÆ
+    CarCondition car = 1; // è½¦è¾†å°ºå¯¸ä¸å®‰å…¨ä½™é‡
+    repeated OrderCondition orders = 2; // å­è®¢å•åŠå…¶ç®±å‹ä¿¡æ¯
+    Limitation limit = 3; // è§„åˆ’å™¨å›å‹é™åˆ¶
 }
 
-// ³µÁ¾Ìõ¼ş
+// è½¦è¾†å‚æ•°ï¼Œå°ºå¯¸å•ä½ç”±æ¥å£åŒæ–¹çº¦å®šï¼›robot_process å½“å‰æŒ‰æ¯«ç±³å¤„ç†ã€‚
 message CarCondition{
-    string type = 1; // ³µĞÍ´úºÅ
-    Size original = 2; // ³µÁ¾Ô­Ê¼³ß´ç
-    Size reserve = 3; // °²È«ÔËĞĞÈßÓà³ß´ç
-    Size frame = 4; // Î²ÃÅÃÅ¿ò³ß´ç
+    string type = 1; // è½¦å‹ä»£å·
+    Size original = 2; // è½¦è¾†å†…éƒ¨åŸå§‹å°ºå¯¸
+    Size reserve = 3; // å®‰å…¨è¿è¡Œé¢„ç•™å°ºå¯¸
+    Size frame = 4; // å°¾é—¨é—¨æ¡†å°ºå¯¸
 }
 
-// ³ß´ç²ÎÊı
+// é•¿ã€å®½ã€é«˜ä¸‰ç»´å°ºå¯¸ã€‚
 message Size{
-    float L = 1; // ³¤¶È
-    float W = 2; // ¿í¶È
-    float H = 3; // ¸ß¶È
+    float L = 1; // é•¿åº¦/è½¦å¢æ·±åº¦æ–¹å‘
+    float W = 2; // å®½åº¦/è½¦å¢å®½åº¦æ–¹å‘
+    float H = 3; // é«˜åº¦/è½¦å¢é«˜åº¦æ–¹å‘
 }
 
-// ×Ó¶©µ¥Ìõ¼ş
+// ä¸€ä¸ªå­è®¢å•åŠå…¶å¯ç”¨ç®±å‹ã€‚
 message OrderCondition{
-    string orderId = 1; // ³ö¿âµ¥µØÖ·
-    repeated BoxCondition boxes = 2; // ºÏÍ¬ÏäĞÍĞÅÏ¢
+    string orderId = 1; // å­è®¢å•å·
+    repeated BoxCondition boxes = 2; // è¯¥å­è®¢å•çš„ç®±å‹é…ç½®
 }
 
-// ÏäĞÍĞÅÏ¢
+// ç®±å‹å°ºå¯¸ã€æŠ“å–èƒ½åŠ›åŠä¸šåŠ¡æ ‡è¯†ã€‚
 message BoxCondition{
-    string type = 1; // ÏäĞÍ´úºÅ
-    Size original = 2; // ÏäĞÍÔ­Ê¼³ß´ç
-    Size reserve = 3; // ÏäĞÍÈßÓà³ß´ç
-    Grip grip = 4; // ×¥È¡²ÎÊı
-    int32 Nt = 5; // ×Ü¸öÊı
-    string contractId = 6; //ºÏÍ¬ºÅ
-    string materialId = 7; //ÎïÁÏ´úºÅ
+    string type = 1; // ç®±å‹ä»£å·
+    Size original = 2; // ç®±ä½“åŸå§‹å°ºå¯¸
+    Size reserve = 3; // ç®±ä½“å»ºæ¨¡é™„åŠ ä½™é‡
+    Grip grip = 4; // P1/P2/P3å•æŠ“èƒ½åŠ›
+    int32 Nt = 5; // è¯¥ç®±å‹æ€»ç®±æ•°
+    string contractId = 6; // åˆåŒå·
+    string materialId = 7; // ç‰©æ–™ä»£å·
 }
 
-// ×¥È¡²ÎÊı(µ¥×¥¸öÊıºÍµ¥´Î×¥È¡Ê±¼ä)
+// å„åŒºåŸŸå…è®¸çš„å•æŠ“ç®±æ•°åˆ—è¡¨ã€‚
 message Grip{
-    repeated int32 P1 = 1; // P1×¥È¡²ÎÊı
-    repeated int32 P2 = 2; // P2×¥È¡²ÎÊı
-    repeated int32 P3 = 3; // P3×¥È¡²ÎÊı
+    repeated int32 P1 = 1; // P1ç«–æ”¾æŠ“å–å‚æ•°
+    repeated int32 P2 = 2; // P2ä¾§å£åŒºæŠ“å–å‚æ•°
+    repeated int32 P3 = 3; // P3ä¾§ç«‹æŠ“å–å‚æ•°
 }
 
-// ¶©µ¥ÏŞÖÆ
+// è§„åˆ’å™¨ç”Ÿæˆå›å‹æ—¶ä½¿ç”¨çš„é™åˆ¶æ¡ä»¶ã€‚
 message Limitation{
-    int32 N1min = 1; // Ã¿ĞĞP1¸öÊıÏÂÏŞ
-    int32 T3max = 2; // P3¸ß¶ÈĞĞÊıÉÏÏŞ
-    int32 N2max = 3; // Ã¿ĞĞP2¸öÊıÉÏÏŞ
-    int32 T12min = 4; // P1P2¸ß¶ÈĞĞÊıÏÂÏŞ
-    repeated int32 Elim = 5; // Î²ÁÏĞÎÌ¬¿ÉÑ¡ÏŞÖÆ
-    bool Istrapezoid = 6; // ÌİĞÎÎ²¶â¿ª¹Ø
-    int32 Strategy = 7; // ¶âĞÍÉú³É²ßÂÔÆ«ÖØ
-    int32 P1P2gap = 8; // P1P2Ïä¼äÏ¶(Ôİ¶¨)
-    int32 G = 9; // ÖØĞÄÔ£Á¿(Ôİ¶¨)
-    int32 Tback = 10; // ¶âĞÍÃ¿Ãæ¼äÏ¶ÈßÓà
-    repeated int32 Overlap = 11; // ¶Ñµş·ìÏ¶³ß´ç
+    int32 N1min = 1; // æ¯è¡ŒP1ç®±æ•°ä¸‹é™
+    int32 T3max = 2; // P3é«˜åº¦è¡Œæ•°ä¸Šé™
+    int32 N2max = 3; // æ¯è¡ŒP2ç®±æ•°ä¸Šé™
+    int32 T12min = 4; // P1/P2é«˜åº¦è¡Œæ•°ä¸‹é™
+    repeated int32 Elim = 5; // å…è®¸çš„å°¾æ–™å½¢æ€
+    bool Istrapezoid = 6; // æ˜¯å¦å…è®¸æ¢¯å½¢å°¾å›
+    int32 Strategy = 7; // å›å‹ç”Ÿæˆç­–ç•¥åé‡
+    int32 P1P2gap = 8; // P1/P2ç®±é—´éš™ï¼ˆæš‚å®šï¼‰
+    int32 G = 9; // é‡å¿ƒè£•é‡ï¼ˆæš‚å®šï¼‰
+    int32 Tback = 10; // æ¯é¢ä¹‹é—´çš„çºµæ·±ä½™é‡
+    repeated int32 Overlap = 11; // å †å ç¼éš™å°ºå¯¸
 }

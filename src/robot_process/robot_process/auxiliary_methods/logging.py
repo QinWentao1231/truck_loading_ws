@@ -1,3 +1,5 @@
+"""终端彩色日志和按天轮转文件日志配置。"""
+
 import os
 import datetime
 import colorlog
@@ -28,8 +30,8 @@ os.makedirs(_log_dir, exist_ok=True)
 _default_filepath = os.path.join(_log_dir, 'log_' + datetime.datetime.now().strftime('%Y%m%d') + '.log')
 
 
-# >>> 定义Logger类
 class Logger(object):
+    """创建同时输出到终端和文件的标准 logger。"""
     level_relations = {
         'debug': logging.DEBUG, 'info': logging.INFO,
         'warning': logging.WARNING, 'error': logging.ERROR, 'crit': logging.CRITICAL
@@ -40,6 +42,7 @@ class Logger(object):
     }
 
     def __init__(self, filename=_default_filepath, level='info', when='D', back_count=3):
+        """配置日志级别、轮转周期和保留文件数。"""
         self.logger = logging.getLogger(filename)
         sh_format = colorlog.ColoredFormatter(
             fmt='%(log_color)s%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s',
@@ -56,4 +59,5 @@ class Logger(object):
         self.logger.addHandler(th)
 
     def get_log(self):
+        """返回配置完成的 ``logging.Logger`` 实例。"""
         return self.logger

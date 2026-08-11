@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+// 历史多箱型协议草案，不参与当前 pb2 生成；仅用于追溯早期字段设计。
+
 message Size{
     float L = 1;
     float W = 2;

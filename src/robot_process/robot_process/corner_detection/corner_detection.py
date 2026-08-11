@@ -1,3 +1,10 @@
+"""基于三平面求交的车厢/垛面角点检测。
+
+输入为 Open3D 点云（米）。算法先把雷达点云绕 Z 轴旋转到内部坐标系，再提取前面、
+左右侧面与地面；角点转换到机器人基坐标系后以毫米返回。``method`` 用于选择常规
+车头、I/L 垛面、车尾俯仰、异形车头或混装前表面的不同处理分支。
+"""
+
 import open3d as o3d
 import numpy as np
 import math
@@ -64,6 +71,7 @@ class CornerDetectionCandidateError(ValueError):
 
 
 def require_candidate_points(pcd, name, min_points=MIN_PLANE_CANDIDATE_POINTS):
+    """校验 Open3D 点云点数，不足时抛出可安全降级的候选异常。"""
     point_count = len(pcd.points)
     if point_count < min_points:
         raise CornerDetectionCandidateError(
@@ -72,6 +80,7 @@ def require_candidate_points(pcd, name, min_points=MIN_PLANE_CANDIDATE_POINTS):
 
 
 def require_candidate_values(values, name, min_values=1):
+    """校验数组/序列有效元素数量，不足时抛出候选异常。"""
     value_count = len(values)
     if value_count < min_values:
         raise CornerDetectionCandidateError(
@@ -291,10 +300,12 @@ def estimate_ground_normal_consensus(points, name="Ry地面", trials=31):
 
 
 def _wrap_angle_deg(angle):
+    """把角度归一化到 ``[-180°, 180°)``。"""
     return (float(angle) + 180.0) % 360.0 - 180.0
 
 
 def relative_ry_from_0630_baseline(raw_ry_deg):
+    """把原始 Ry 换算为相对车厢内标定零点的角度，并应用死区。"""
     delta = _wrap_angle_deg(raw_ry_deg - RY_INTERIOR_BASELINE_DEG)
     return 0.0 if abs(delta) < RY_OUTPUT_DEADBAND_DEG else delta
 
@@ -574,16 +585,12 @@ def detect_special_front_planes(points, normals, center_model,
 
 
 def _process_point_cloud_impl(pcd, method):
-    # #保存pcd点云到路径
-    # target_file_path = "/home/fanuc/Test_ws/corn_poits.pcd"
-    # success = o3d.io.write_point_cloud(target_file_path, pcd, write_ascii=True)
-    # if success:
-    #     print(f"传入点云已成功保存到 {target_file_path}")
-    # else:
-    #     print("点云保存失败")
-    # file_path = "/home/fanuc/data_nav/carriage/trun_cloud_20250714_130945.pcd"
-    # pcd = o3d.io.read_point_cloud(file_path)
-    # method = 3
+    """执行角点检测主流程；输入点云会原位旋转到算法内部坐标系。
+
+    method 含义：1=车头波纹板，2=I形垛面，3=L形垛面四角点，
+    4=I形垛面并输出相对车厢内基准的 Ry，5=异形车头双斜面，
+    6=前一面为混装面并选择最靠雷达的有效前表面。除 method=4 外 Ry 为0。
+    """
     ori_points = np.asarray(pcd.points)
     theta = np.pi / 2
     R_z = np.array([
@@ -593,33 +600,13 @@ def _process_point_cloud_impl(pcd, method):
     ])
     rotated_points = np.dot(ori_points, R_z.T)
     pcd.points = o3d.utility.Vector3dVector(rotated_points)
-    # 打印点云数量
     num_points = len(np.asarray(pcd.points))
     print(f"******输入点云数量为 : {num_points}")
 
 
-    # target_file_path_ply = "/home/fanuc/Test_ws/corn.ply"
-    # #保存ply点云到目标路径
-    # success = o3d.io.write_point_cloud(target_file_path_ply, pcd)
-    # if success:
-    #     print(f"传入点云已成功保存到 {target_file_path_ply}")
-    # else:
-    #     print("点云保存失败")
-
-
     def segment_plane(pcd, distance_threshold=0.005, ransac_n=3,
                       num_iterations=10000, candidate_name="平面"):
-        """
-        分割点云中的平面并在原始点云上以不同颜色标记显示。
-        Args:
-            pcd: Open3D 点云对象
-            distance_threshold: RANSAC 的距离阈值
-            ransac_n: RANSAC 拟合平面所需的最小点数
-            num_iterations: RANSAC 的迭代次数
-        Returns:
-            planes: 分割出的平面点云列表
-            remaining_cloud: 剩余点云
-        """
+        """校验候选点后执行 RANSAC，返回 ``(模型, 内点云, 外点云)``。"""
         require_candidate_points(
             pcd, candidate_name, max(ransac_n, MIN_PLANE_CANDIDATE_POINTS))
         plane_model, inliers = pcd.segment_plane(
@@ -633,14 +620,7 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def show_plane(model, color):
-        """
-        平面拟合可视化。
-        Args:
-            model: 平面方程
-            color: 绘制颜色
-        Returns:
-            plane_mesh: Open3D Box对象
-        """
+        """把平面方程绘制为指定颜色的薄盒网格。"""
         normal = np.array([model[0], model[1], model[2]])
         normal = normal / np.linalg.norm(normal)  # 单位化目标法向
         # 计算平面法向量的旋转
@@ -675,34 +655,19 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def intersection_of_planes(plane1, plane2, plane3):
-        """
-        拟合三个平面的交点。
-        Args:
-            plane1, plane2, plane3: 平面方程
-        Returns:
-            intersection_point: 交点
-        """
-        # 解线性方程组 Ax = b，求解三个平面的交点
+        """通过线性方程组求三个平面的唯一交点。"""
         A = np.array([
             [plane1[0], plane1[1], plane1[2]],
             [plane2[0], plane2[1], plane2[2]],
             [plane3[0], plane3[1], plane3[2]]
         ])
         b = np.array([-plane1[3], -plane2[3], -plane3[3]])
-        # 使用np.linalg.solve求解
         intersection_point = np.linalg.solve(A, b)
         return intersection_point
 
 
     def matrix2euler(r):
-        """
-        旋转矩阵转欧拉角xyzwpr。
-        Args:
-            r: 4*4旋转矩阵
-        Returns:
-            xyzwpr
-        """
-        # 确保传入的是3x3旋转矩阵
+        """将 4×4 位姿矩阵转换为 ``[x,y,z,roll,pitch,yaw]``（角度制）。"""
         assert r.shape == (4, 4)
         # 计算欧拉角 (ZYX 顺序)
         yaw = np.arctan2(r[1, 0], r[0, 0])  # z轴旋转
@@ -712,18 +677,18 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def point_to_plane_distance(point, a, b, c, d):
-        # 计算点到平面的符号
+        """返回点代入平面方程后的未归一化有符号值。"""
         return a * point[0] + b * point[1] + c * point[2] + d
 
 
     def fiterCloud(pcd):
-        # vox_pcd = pcd
-        # vox_pcd = pcd.voxel_down_sample(voxel_size=0.005)
+        """执行统计离群点过滤；函数名保留旧接口拼写。"""
         down_pcd = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)[0]
         return down_pcd
 
 
     def clustFrontBoard(pcd):
+        """把 L 形垛面的前板聚成两组平面，返回前后模型及各自 Y 跨度。"""
         require_candidate_points(pcd, "L垛面聚类")
         labels = np.array(pcd.cluster_dbscan(eps=0.03, min_points=10))
         unique_labels, counts = np.unique(labels, return_counts=True)
@@ -775,7 +740,6 @@ def _process_point_cloud_impl(pcd, method):
         merged_points = selected_clusters[0]
         for cloud in selected_clusters[1:]:
             merged_points += cloud
-        # merged_points.paint_uniform_color([1, 1, 0])
         other_points = other_clusters[0]
         for cloud in other_clusters[1:]:
             other_points += cloud
@@ -809,7 +773,6 @@ def _process_point_cloud_impl(pcd, method):
             other_points, candidate_name="L垛面第二组")
         aabb = other_points.get_axis_aligned_bounding_box()
         bounding_box_other = aabb.get_extent()
-        # final_plane_model[3] = -d_array.min()
         if len(merged_points.points) <= len(other_points.points):
             return [[final_plane_model[0], final_plane_model[1], final_plane_model[2], final_plane_model[3],
                     bounding_box_final[1]],
@@ -829,10 +792,7 @@ def _process_point_cloud_impl(pcd, method):
     if view or view_normal:
         _prepare_visualization_backend()
     corner_list = []
-    # 1: 车头波纹板；2: I垛面；3: L垛面；
-    # 4: I垛面角点，并返回相对车厢内基准的 Ry；
-    # 5: 异形车头，返回正面与左右斜面交线在地面上的两个点。
-    # 6: 前一面为混装面，按法向深度分层并使用最外侧有效箱面。
+    # method 的完整定义见本函数文档字符串。
     print(f'method: {method}')
     _FRONT_RIB_MIN = 0.05            # 车头加强筋兜底补偿(m)：筋检测不足时至少前移此距离
     _FRONT_RIB_MAX = 0.10            # 车头加强筋补偿上限(m)：检测过深时最多前移此距离
@@ -862,7 +822,6 @@ def _process_point_cloud_impl(pcd, method):
         removed_display_points = len(display_points) - len(display_pcd.points)
         if removed_display_points:
             print(f'Down可视化已排除异常超远点: {removed_display_points}')
-        # display_pcd.paint_uniform_color([0.2, 0.2, 0.2])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="Down", width=800, height=600, left=500, top=200)
         vis.add_geometry(display_pcd, reset_bounding_box=True)
@@ -1203,7 +1162,6 @@ def _process_point_cloud_impl(pcd, method):
     target_normal = np.array([0, -1, 0])
     cos_theta = np.dot(normals, target_normal)
     angle_threshold = np.cos(np.radians(10))
-    # right_indices = np.where(cos_theta > angle_threshold)[0]
     x_threshold = -i_model[3]-0.03 if method != 3 else -l_model[3]-0.03
     z_threshold = -0.5
     mask = (cos_theta > angle_threshold) & ((-i_model[3]-0.6) < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
@@ -1397,7 +1355,7 @@ def _process_point_cloud_impl(pcd, method):
         f'垛面法向={ry_from_front:.3f}°, 差值={ry_difference:.3f}°'
     )
 
-    # 校验底面法线
+    # 计算前面/侧面交线与固定地面法向的夹角诊断量；当前不参与结果判定。
     v1 = np.array([i_model[0], i_model[1], i_model[2]])
     v2 = np.array([side_left_model[0], side_left_model[1], side_left_model[2]])
     v3 = np.array([ground_model[0], ground_model[1], ground_model[2]])
@@ -1411,9 +1369,6 @@ def _process_point_cloud_impl(pcd, method):
     angle_rad = np.arccos(np.clip(cos_theta, -1, 1))
     angle_with_plane_rad = np.pi / 2 - angle_rad
     angle_with_plane_deg = np.degrees(angle_with_plane_rad)
-    # if angle_with_plane_deg < 85 or np.max(temp_points[:, 2]) + ground_model[3] > 0.08:
-    #     raise Exception(f"地面法线夹角: {angle_with_plane_deg:.2f}, "
-    #                     f"地面凸起： {np.max(filtered_points[:, 2]) + ground_model[3]:.2f}, 请检查具体情况")
     if view:
         ground_plane = show_plane(ground_model, [0, 1, 0])
         vis = o3d.visualization.Visualizer()
@@ -1461,22 +1416,17 @@ def _process_point_cloud_impl(pcd, method):
                          (corner_point2[2] - corner_point1[2])])
         o_be = o_be / np.linalg.norm(o_be)
         o_no = np.array([-side_left_model[0], -side_left_model[1], -side_left_model[2]])
-        # 计算点积
+        # 以左右角点连线建立返回位姿的横向轴；夹角仅保留作诊断计算。
         dot_product = np.dot(o_be, o_no)
-        # 计算模
         magnitude_a = np.linalg.norm(o_be)
         magnitude_b = np.linalg.norm(o_no)
-        # 计算夹角的余弦值
         cos_theta = dot_product / (magnitude_a * magnitude_b)
-        # 计算夹角，返回值是弧度
         theta = np.arccos(cos_theta)
-        # 将弧度转换为角度
         theta_degrees = np.degrees(theta)
         if theta_degrees < 10:
             o_re = o_be
         else:
             o_re = o_be
-        # corner_point1[0] = min(corner_point1[0], corner_point2[0])
         # 车头加强筋补偿已并入 i_model（前平面前移），此处不再额外偏移角点
         a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
@@ -1545,22 +1495,17 @@ def _process_point_cloud_impl(pcd, method):
                          (corner_point4[2] - corner_point1[2])])
         o_be = o_be / np.linalg.norm(o_be)
         o_no = np.array([-side_left_model[0], -side_left_model[1], -side_left_model[2]])
-        # 计算点积
+        # L 垛同样用左、右角点连线建立返回位姿的横向轴。
         dot_product = np.dot(o_be, o_no)
-        # 计算模
         magnitude_a = np.linalg.norm(o_be)
         magnitude_b = np.linalg.norm(o_no)
-        # 计算夹角的余弦值
         cos_theta = dot_product / (magnitude_a * magnitude_b)
-        # 计算夹角，返回值是弧度
         theta = np.arccos(cos_theta)
-        # 将弧度转换为角度
         theta_degrees = np.degrees(theta)
         if theta_degrees < 10:
             o_re = o_be
         else:
             o_re = o_be
-        # corner_point1[0] = min(corner_point1[0], corner_point4[0])
         a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
         corner_point1_m = np.array([[n_re[0], o_re[0], a_re[0], corner_point1[0] * 1000],
@@ -1674,7 +1619,7 @@ def _process_point_cloud_impl(pcd, method):
 
 
 def process_point_cloud(pcd, method):
-    """执行角点检测；候选点不足时安全返回空列表。"""
+    """执行角点检测；候选数据不足时记录原因并安全返回空列表。"""
     try:
         return _process_point_cloud_impl(pcd, method)
     except CornerDetectionCandidateError as exc:

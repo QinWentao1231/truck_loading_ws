@@ -1,3 +1,9 @@
+"""路径 HTML 与整面垛型 PNG 可视化工具。
+
+逐抓 HTML 使用 Plotly 绘制路径点包围盒和已有障碍；面级 PNG 使用 Matplotlib
+绘制 Y-Z 正视图及三维箱体布局。所有几何尺寸沿用主流程的毫米单位。
+"""
+
 import os
 import datetime
 
@@ -111,6 +117,7 @@ def save_face_layout(
     }
 
     def cuboid_faces(x, y, z, dx, dy, dz):
+        """返回轴对齐长方体的六个四边形面。"""
         points = [
             (x, y, z), (x + dx, y, z), (x + dx, y + dy, z), (x, y + dy, z),
             (x, y, z + dz), (x + dx, y, z + dz),
@@ -145,7 +152,7 @@ def save_face_layout(
                 cuboid_faces(x, y, z, length, width, height),
                 facecolors=color, edgecolors='white', linewidths=0.45, alpha=0.78))
             if box_index in risk_box_indices:
-                # 正视图用粗红底边标记支撑不足的单箱；三维图在其底面铺红色面。
+                # 正视图用粗红底边标记重心不稳定的单箱；三维图在其底面铺红色面。
                 ax.plot(
                     [y, y + width], [z, z],
                     color='#D62728', linewidth=5.0,
@@ -242,12 +249,9 @@ def save_face_layout(
 
 
 class Plot(object):
+    """累积 Plotly 图元并把单抓路径场景写入 HTML。"""
     def __init__(self, filename, output_dir=None):
-        """
-        Create a plot
-        :param filename: filename (without extension)
-        Saved to: <ws_root>/log/<pkg_name>/YYYYMMDD/<filename>.html
-        """
+        """创建空图；``filename`` 不含扩展名，默认保存到当天日志目录。"""
         if py is None or go is None:
             raise RuntimeError("plotly 未安装，无法生成逐抓 HTML 可视化")
         output_dir = output_dir or resolve_output_dir()
@@ -262,11 +266,7 @@ class Plot(object):
                     'layout': self.layout}
 
     def plot_tree(self, X, trees):
-        """
-        Plot tree
-        :param X: Search Space
-        :param trees: list of trees
-        """
+        """按搜索空间维数选择二维或三维方式绘制树边。"""
         if X.dimensions == 2:  # plot in 2D
             self.plot_tree_2d(trees)
         elif X.dimensions == 3:  # plot in 3D
@@ -275,10 +275,7 @@ class Plot(object):
             print("Cannot plot in > 3 dimensions")
 
     def plot_tree_2d(self, trees):
-        """
-        Plot 2D trees
-        :param trees: trees to plot
-        """
+        """把各二维树的父子边追加为 Plotly 线段。"""
         for i, tree in enumerate(trees):
             for start, end in tree.E.items():
                 if end is not None:
@@ -293,10 +290,7 @@ class Plot(object):
                     self.data.append(trace)
 
     def plot_tree_3d(self, trees):
-        """
-        Plot 3D trees
-        :param trees: trees to plot
-        """
+        """把各三维树的父子边追加为 Plotly 线段。"""
         for i, tree in enumerate(trees):
             for start, end in tree.E.items():
                 if end is not None:
@@ -312,11 +306,7 @@ class Plot(object):
                     self.data.append(trace)
 
     def plot_obstacles(self, X, O):
-        """
-        Plot obstacles
-        :param X: Search Space
-        :param O: list of obstacles
-        """
+        """绘制轴对齐障碍物；二维用矩形，三维用半透明长方体。"""
         if X.dimensions == 2:  # plot in 2D
             self.layout['shapes'] = []
             for O_i in O:
@@ -409,11 +399,7 @@ class Plot(object):
             print("Cannot plot in > 3 dimensions")
 
     def plot_start(self, X, x_init):
-        """
-        Plot starting point
-        :param X: Search Space
-        :param x_init: starting location
-        """
+        """按搜索空间维数绘制橙色起点。"""
         if X.dimensions == 2:  # plot in 2D
             trace = go.Scatter(
                 x=[x_init[0]],
@@ -443,11 +429,7 @@ class Plot(object):
             print("Cannot plot in > 3 dimensions")
 
     def plot_goal(self, X, x_goal):
-        """
-        Plot goal point
-        :param X: Search Space
-        :param x_goal: goal location
-        """
+        """按搜索空间维数绘制绿色目标点。"""
         if X.dimensions == 2:  # plot in 2D
             trace = go.Scatter(
                 x=[x_goal[0]],
@@ -477,7 +459,5 @@ class Plot(object):
             print("Cannot plot in > 3 dimensions")
 
     def draw(self, auto_open=False):
-        """
-        Render the plot to a file
-        """
+        """把已累积的图元写入 HTML；``auto_open`` 控制是否自动打开。"""
         py.offline.plot(self.fig, filename=self.filename, auto_open=auto_open)

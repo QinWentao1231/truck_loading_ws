@@ -42,6 +42,7 @@ MENU = """
 
 
 def recv_exact(sock, n):
+    """从连接中读取恰好 ``n`` 字节，提前断开时抛出连接异常。"""
     buf = b''
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
@@ -52,6 +53,7 @@ def recv_exact(sock, n):
 
 
 def recv_response(sock):
+    """读取一帧 robot_process 响应并拆成若干41字节数据块。"""
     header = recv_exact(sock, _HEADER_SIZE)
     num_blocks = header[7]
     payload = recv_exact(sock, num_blocks * _BLOCK_SIZE + 2)
@@ -60,16 +62,19 @@ def recv_response(sock):
 
 
 def parse_floats(block, count=9):
+    """从通用数据块第5字节后解析指定数量的大端 float32。"""
     return struct.unpack_from('!' + 'f' * count, block, 5)
 
 
 def parse_path_block(block):
+    """解析路径块的动作标志和 XYZ 坐标。"""
     flag = struct.unpack_from('!I', block, 1)[0]
     x, y, z = struct.unpack_from('!fff', block, 5)
     return flag, x, y, z
 
 
 def handle_get_pallet(sock):
+    """请求并打印整车统计、默认箱型尺寸和混装 block 位置。"""
     sock.sendall(CMD_GET_PALLET)
     n, blocks = recv_response(sock)
     f0 = parse_floats(blocks[0], 3)
@@ -85,6 +90,7 @@ def handle_get_pallet(sock):
 
 
 def handle_get_per_count(sock):
+    """请求并打印当前面的箱数、箱型和底层每行抓数。"""
     sock.sendall(CMD_GET_PER_COUNT)
     _, blocks = recv_response(sock)
     f = parse_floats(blocks[0], 3)
@@ -92,6 +98,7 @@ def handle_get_per_count(sock):
 
 
 def handle_get_box(sock):
+    """请求并打印下一抓来料编码、区域码和箱体尺寸。"""
     sock.sendall(CMD_GET_BOX)
     n, blocks = recv_response(sock)
     f = parse_floats(blocks[0], 3)
@@ -102,6 +109,7 @@ def handle_get_box(sock):
 
 
 def handle_get_path(sock):
+    """请求并打印下一抓路径点及末尾动作信息块。"""
     sock.sendall(CMD_GET_PATH)
     n, blocks = recv_response(sock)
     path_blocks = blocks[:-1]
@@ -117,6 +125,7 @@ def handle_get_path(sock):
 
 
 def handle_chk_path(sock):
+    """触发服务端批量路径检查并打印最终状态。"""
     sock.sendall(CMD_CHK_PATH)
     _, blocks = recv_response(sock)
     status = int(parse_floats(blocks[0], 1)[0])
@@ -125,6 +134,7 @@ def handle_chk_path(sock):
 
 
 def handle_stacking(sock):
+    """触发双雷达垛面检测并打印理论/实测宽度。"""
     sock.sendall(CMD_STACKING)
     _, blocks = recv_response(sock)
     f = parse_floats(blocks[0], 3)
@@ -144,6 +154,7 @@ HANDLERS = {
 
 
 def run(host, port):
+    """运行可重连的交互式机器人命令菜单。"""
     sock = None
 
     while True:

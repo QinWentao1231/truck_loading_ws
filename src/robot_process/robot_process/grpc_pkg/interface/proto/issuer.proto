@@ -5,14 +5,17 @@ import "condition.proto";
 
 
 service Issuer {
+  // 一次性下发车辆/箱型条件与规划器求解结果。
   rpc Issue (IssueRequest) returns (IssueReply) {}
 }
 
+// 主节点解析时同时使用 condition 中的尺寸和 answer 中的垛型。
 message IssueRequest {
     Condition condition = 1;
     Answer answer = 2;
 }
 
+// result 表示整份请求是否成功归一化，message 为可读摘要。
 message IssueReply {
     bool result = 1;
     string message = 2;

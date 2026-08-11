@@ -1,3 +1,10 @@
+"""机器人装车主流程：解析垛型、生成放置动作并响应机器人 TCP 指令。
+
+该模块负责把 gRPC/JSON 订单归一化为 ``RobotPosition``，维护多 block 执行状态，
+生成每抓路径，并按配置执行路径、混装支撑和垛面宽度检查。协议中的长度单位均为
+毫米；垛面检测模块内部使用米，调用边界处会显式换算。
+"""
+
 import os
 import sys
 current_file = os.path.abspath(__file__)
@@ -24,8 +31,8 @@ from auxiliary_methods.resume_store import ResumeStore, resolve_resume_dir
 
 
 # ── 机器人下发指令（16字节定长，机器人→服务端）────────────────────────
-# 格式：start_word(2B) + version(2B) + action_id(2B) + reserved(10B)
-# fefe = 起始字，0001 = 版本，01xx = 指令编号
+# 当前现场帧格式：start_word(2B)=fefe + fixed(2B)=0000
+#                + action_id(2B)=01xx + reserved(10B)=0。
 cmd_get_pallet    = 'fefe0000010100000000000000000000'  # 请求垛型总体信息
 cmd_get_per_count = 'fefe0000010200000000000000000000'  # 请求当前码垛面箱数
 cmd_get_box       = 'fefe0000010300000000000000000000'  # 请求下一箱来料配方
@@ -46,8 +53,8 @@ _AREA_NUM = {'p1': 1, 'p2': 2, 'p3': 3}
 # 雷达装在桅杆上、桅杆装在机器人 J1 轴上；不同箱型在各自拍照位拍照，
 # 与"正对箱面"的 J1 有固定偏差 → 点云相应偏航，需补偿。
 # 箱型首位：1=常规、2=细支、3=中支。
-#   常规(1xx)/中支(3xx) → 拍照位 -50°（偏 +10°）
-#   细支(2xx)          → 拍照位 -55°（偏 +5°）
+#   常规(1xx)/中支(3xx) → 拍照位 -53.1°（补偿 +7.4°）
+#   细支(2xx)          → 拍照位 -56.6°（补偿 +3.9°）
 # 偏航补偿角 = 拍照位 J1 − 正对 J1
 _J1_FACE_DEG = -60.5            # 正对（雷达垂直箱面）时的 J1
 _J1_PHOTO_REGULAR_DEG = -53.1  # 常规箱(1xx) / 中支箱(3xx) 拍照位 J1
@@ -56,7 +63,7 @@ _J1_PHOTO_SLIM_DEG = -56.6     # 细支烟箱(2xx) 拍照位 J1
 
 def _yaw_offset_for_box(box_type) -> float:
     """根据箱型首位判定烟支类型，返回点云偏航补偿角(度) = 拍照位 J1 − 正对 J1。
-    首位 '2'=细支 用 -55°，其余(1xx常规/3xx中支) 用 -50°。"""
+    首位 ``2`` 使用细支拍照位 -56.6°，其余使用常规/中支拍照位 -53.1°。"""
     j1_photo = _J1_PHOTO_SLIM_DEG if str(box_type)[:1] == '2' else _J1_PHOTO_REGULAR_DEG
     return j1_photo - _J1_FACE_DEG
 
@@ -107,14 +114,14 @@ def _format_stacking_replay_call(
         f'    {name}={_compact_python_literal(value)},'
         for name, value in params
     )
-    lines.append(')  # view 跟随顶部 VIEW 开关')
+    lines.append(')  # 离线回放显式开启可视化')
     return '\n'.join(lines)
 
 
 def _build_msg(num_blocks: int, payload: bytes) -> bytes:
     """拼装完整响应报文。
     结构：_MSG_HEADER(7B) + num_blocks(1B) + err_code(1B)=00
-          + reserved(3B)=000000 + mes_data_num(1B)=91 + payload
+          + reserved(4B)=00000000 + mes_data_num(1B)=91 + payload
     num_blocks：本次报文携带的数据块数量（每块41字节）。"""
     return _MSG_HEADER + num_blocks.to_bytes(1, 'big') + b'\x00\x00\x00\x00\x00\x91' + payload
 
@@ -722,6 +729,11 @@ def parse_planner_json(data: dict):
 
 
 def callback(data):
+    """解析规划器 gRPC 请求并刷新全局 block 配置。
+
+    解析开始时会清空 ``glob_data``，随后逐个 block 重建；解析异常时可能留下
+    尚未完成的中间列表并返回失败应答，因此调用方只应在成功应答后使用新垛型。
+    """
     global glob_data
     try:
         car_orig = data.condition.car.original
@@ -832,6 +844,7 @@ def _fast_forward(rp_list, be, cursor):
 
 
 def main():
+    """启动主服务并循环处理机器人指令，单项任务异常由各自边界兜底记录。"""
     global glob_data
     # 日志配置
     logs.info("***垛序及机器人路径规划程序启动 ver.0.5.6（支持混码）-alpha-for济南烟厂***")
@@ -993,7 +1006,6 @@ def main():
                     sys.exit(1)
             logs.warning("断点续传已确认，继续码垛。")
         # 指令集循环
-        # try:
         while True:
             if chk_value == 0:
                 try:
@@ -1208,6 +1220,7 @@ def main():
                         _cur_h        = action['pos'][2]
                         _p1_right_wall = rp.W - rp.N2 * rp.l
                         def _phys_right_a(a):
+                            """返回已放 P1 抓包含组内缝隙后的物理右边界。"""
                             return a['pos'][1] + sum(a['num']) * a['size'][1] + sum(a.get('gaps', []))
                         _placed = [a for a in rp.ori_offsets
                                    if a != 'done' and a['area'] == 'p1'
@@ -1224,6 +1237,7 @@ def main():
                         _cur_h         = action['pos'][2]
                         _p3_right_wall = rp.W
                         def _phys_right_p3(a):
+                            """返回已放 P3 抓包含组内缝隙后的物理右边界。"""
                             return a['pos'][1] + sum(a['num']) * a['size'][2] + sum(a.get('gaps', []))
                         _placed_p3 = [a for a in rp.ori_offsets
                                       if a != 'done' and a['area'] == 'p3'
@@ -1401,11 +1415,10 @@ def main():
                                 else:
                                     logs.warning(f"[KIN] Round.{rid} x_app 无法自动规避，保持原值")
 
-                # 多段放置：num=[n1,n2,...] gaps=[g1,...] 时，追加各段落点
+                # 多段放置：num=[n1,n2,...]、gaps=[g1,...] 时追加独立落点。
                 # 最终 path = [x0, x1, x_app, x_goal_seg1, x_goal_seg2, ...]
                 # 机器人侧：前3点为过渡/接近点（区域 flag），之后每点为一段落点
                 # 末点（最后一段）使用动作 flag，其余各段落点使用区域 flag
-                # 多段放置：组内存在缝隙时 num=[n1,n2,...] gaps=[g1,...]，每段有独立落箱点
                 num_segs = action['num']
                 gaps = action.get('gaps', [])
                 extra_goals = []
@@ -1481,8 +1494,9 @@ def main():
                                  ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
                                  if extra_goals else ""))
                     # 混装面物理支撑分析只提示和记录，不阻断路径下发。
-                    # 使用当前抓之前已经写入 BinEnv 的真实箱体，检查底面支撑率，
-                    # 并判断单箱重心是否落在全部接触面的联合支撑凸包内。
+                    # 使用当前抓之前写入 BinEnv 的真实箱体计算接触面积；风险判据
+                    # 是单箱重心未落在直接接触面或至少两个支撑面的联合凸包内。
+                    # 配置中的面积比例目前只随结果输出，供诊断参考，不参与告警。
                     if rp.block_type == 'mixture' and action['area'] == 'p1':
                         try:
                             physical_support = be.analyze_mixture_support(action)
@@ -1564,6 +1578,7 @@ def main():
                                           and a['num_F'] == action['num_F']
                                           and a['id'] < action['id']]
                                 def _phys_right(a):
+                                    """返回规则垛已放 P1 抓的物理右边界。"""
                                     return (a['pos'][1]
                                             + sum(a['num']) * a['size'][1]
                                             + sum(a.get('gaps', [])))

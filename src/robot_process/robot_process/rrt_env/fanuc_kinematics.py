@@ -14,10 +14,10 @@ Fanuc R-1000iA/120F 运动学辅助模块
   若未配置 kin_uf_offset，则假设 User Frame = Base Frame（需安装时校准）。
 
 DH 参数说明：
-  使用标准 DH 约定（Craig 版本）：
+  使用经典/标准 DH 约定：
     T_i = Rz(theta_i) · Tz(d_i) · Tx(a_i) · Rx(alpha_i)
   参数基于 Fanuc R-1000iA/120F 公开规格推导，*使用前必须与实际机器人 MASTERING 数据核对*。
-  可通过 config.json 中 kin_dh_params 字段覆盖（6×4 列表）。
+  可通过 FanucKinematics(dh=...) 覆盖（6×4 数组）；当前主节点只传入 User Frame。
 
 依赖：numpy（已在 requirements.txt 中）
 """
@@ -91,7 +91,7 @@ def default_tool_rotation() -> np.ndarray:
     """
     默认夹爪姿态旋转矩阵（作业坐标系中）：工具 Z 轴朝下，X 轴朝机器人前方。
     对应 Fanuc XYZWPR 约 W=-180°, P=0°, R=0°。
-    可根据实际工具安装方向在 config.json 中替换。
+    调用 ``check_pose``/``validate_path`` 时可通过 ``R_tool`` 覆盖。
     """
     return np.array([
         [ 1.0,  0.0,  0.0],
@@ -129,6 +129,7 @@ class FanucKinematics:
         jlim: Optional[np.ndarray] = None,
         uf_transform: Optional[np.ndarray] = None,
     ):
+        """保存 DH、关节限位及 User Frame 到 Base Frame 的变换。"""
         self._dh   = dh   if dh   is not None else _DH_DEFAULT.copy()
         self._jlim = jlim if jlim is not None else _JLIM_DEFAULT.copy()
         self._T_uf = uf_transform if uf_transform is not None else np.eye(4)
@@ -395,12 +396,12 @@ class FanucKinematics:
             原因：z 升高使肩/肘角度改变，腕中心位置偏移，J5 脱离 0 附近
 
           elbow（J3 接近极限）
-            → 逐步增大 x（拉向机器人，每步 +50mm，最多 3 步）
+            → 按当前现场 User Frame 逐步增加 x（候选 +50/+80/+120mm）
             → 再试 z 同步抬高
-            原因：减小水平伸展量使 J3 回到正常范围
+            该方向是否靠近机器人取决于实际 User Frame 标定
 
           shoulder（腕中心接近 J1 轴）
-            → 同步增大 x 和 z（±50/80mm 组合）
+            → 同步增大 x 和 z（正向50/80/100mm组合）
             原因：需要改变整体手臂配置
 
           无具体类型但 near_singularity=True（可操作度偏低 / J4 限位）
@@ -422,6 +423,7 @@ class FanucKinematics:
 
         # ── 翻转腕部（J4+180°, J6-180°）种子，不改变 Cartesian 位置 ──────
         def _try_flipped_seed(xyz):
+            """用 J4/J6 相反方向偏转的种子重求同一笛卡尔位姿。"""
             seeds_to_flip = [q_seed] if q_seed is not None else []
             seeds_to_flip += [
                 np.deg2rad([ 0,  -20, -20,   0, -90,   0]),
@@ -444,11 +446,11 @@ class FanucKinematics:
         if 'wrist' in s_types:
             # 主策略：抬高 z
             candidates += [(0.0, 0.0, float(dz)) for dz in [30, 60, 90, 120, 150]]
-            # 辅助：x 同步后移（车厢深处目标）
+            # 辅助：同时沿当前 User Frame 的 +x、+z 方向扰动
             candidates += [(30.0, 0.0, 30.0), (50.0, 0.0, 50.0)]
 
         if 'elbow' in s_types:
-            # 主策略：增大 x（拉向机器人）
+            # 主策略：沿现场标定的 User Frame 增大 x
             candidates += [(float(dx), 0.0, 0.0) for dx in [50, 80, 120]]
             # 辅助：x 和 z 同时调整
             candidates += [(50.0, 0.0, 30.0), (80.0, 0.0, 50.0)]

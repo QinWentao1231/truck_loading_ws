@@ -1,3 +1,5 @@
+"""基于 R-tree 的轴对齐搜索空间与离散碰撞查询。"""
+
 import numpy as np
 from rtree import index
 
@@ -6,31 +8,28 @@ from auxiliary_methods.obstacle_generation import obstacle_generator
 
 
 class SearchSpace(object):
+    """保存各维边界及障碍物索引，供路径点和采样线段检查。"""
 
     def __init__(self, dimension_lengths, O=None):
+        """用各维 ``[min, max]`` 范围和障碍物列表初始化索引。
+
+        当前实现会直接对 ``O`` 取长度，因此无障碍时也应显式传入空列表。
         """
-        Initialize Search Space
-        :param dimension_lengths: range of each dimension
-        :param O: list of obstacles
-        """
-        # sanity check
+        # 搜索空间至少二维，且每维用 [min, max] 表示。
         if len(dimension_lengths) < 2:
             raise Exception("Must have at least 2 dimensions")
-        self.dimensions = len(dimension_lengths)  # number of dimensions
-        # sanity checks
+        self.dimensions = len(dimension_lengths)
         if any(len(i) != 2 for i in dimension_lengths):
             raise Exception("Dimensions can only have a start and end")
         if any(i[0] > i[1] for i in dimension_lengths):
             raise Exception("Dimension start must be less than dimension end")
-        self.dimension_lengths = dimension_lengths  # length of each dimension
+        self.dimension_lengths = dimension_lengths
         p = index.Property()
         p.dimension = self.dimensions
-        # if O is None:
         if len(O) == 0:
             self.obs = index.Index(interleaved=True, properties=p)
         else:
-            # r-tree representation of obstacles
-            # sanity check
+            # R-tree 中每个障碍物为 (min..., max...) 的轴对齐包围盒。
             if any(len(o) / 2 != len(dimension_lengths) for o in O):
                 raise Exception("Obstacle has incorrect dimension definition")
             if any(o[i] >= o[int(i + len(o) / 2)] for o in O for i in range(int(len(o) / 2))):
@@ -38,10 +37,10 @@ class SearchSpace(object):
             self.obs = index.Index(obstacle_generator(O), interleaved=True, properties=p)
 
     def obstacle_free(self, x, size=None):
-        """
-        Check if a location resides inside of an obstacle
-        :param x: location to check
-        :return: True if not inside an obstacle, False otherwise
+        """检查点或 AABB 的八个角点是否落入障碍物。
+
+        ``x`` 是 AABB 最小角，``size`` 是三轴尺寸。该快速检查不验证障碍物
+        完全穿过包围盒内部但未包含任一角点的特殊相交情况。
         """
         if size is None:
             size = (0, 0, 0)
@@ -55,13 +54,7 @@ class SearchSpace(object):
         return True
 
     def collision_free(self, start, end, r, size):
-        """
-        Check if a line segment intersects an obstacle
-        :param start: starting point of line
-        :param end: ending point of line
-        :param r: resolution of points to sample along edge when checking for collisions
-        :return: True if line segment does not intersect an obstacle, False otherwise
-        """
+        """离散采样移动 AABB 的八条角点轨迹，判断线段是否无碰撞。"""
         starts = [start,
                   (start[0] + size[0], start[1], start[2]),
                   (start[0] + size[0], start[1] + size[1], start[2]),
@@ -86,20 +79,13 @@ class SearchSpace(object):
         return True
 
     def sample(self):
-        """
-        Return a random location within X
-        :return: random location within X (not necessarily X_free)
-        """
+        """在各维边界内均匀采样一点，不保证该点无碰撞。"""
         x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
         return tuple(x)
 
     def sample_free(self, size):
-        """
-        Sample a location within X_free
-        :return: random location within X_free
-        """
+        """持续采样，直到得到移动 AABB 角点不在障碍物内的位置。"""
         while True:  # sample until not inside of an obstacle
             x = self.sample()
             if self.obstacle_free(x, size):
                 return x
-

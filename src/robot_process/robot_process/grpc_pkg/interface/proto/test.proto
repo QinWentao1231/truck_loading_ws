@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+// 历史联调草案，不参与当前 pb2 生成；现行协议见 answer.proto、condition.proto、issuer.proto。
+
 // 求解结果总包
 message Answer{
     repeated Block blocks = 1; // 堆垛队列
@@ -25,14 +27,14 @@ message Regular{
     int32 T3 = 5; // P3高度行数
     int32 F13 = 6; // P1P3面数
     int32 F2 = 7; // P2面数
-    int32 E = 8; // 尾料堆放形式(0 无，1 P1前置，2 P3顶置)
+    int32 E = 8; // 尾料形式：0无，1前置P1，2顶置P3，3顶置P1
     int32 Nx = 9; // 尾料个数
     repeated Stack Stack = 10; // 堆叠缝隙排布
     repeated Group Group = 11; // 堆叠按爪分组
     string Type = 12; // 箱型代号
 }
 
-// 混装面(面数固定为1，全P1堆放，下方箱体为前垛收尾，上方箱体为后垛开头)
+// 旧版嵌套混装结构；现行 answer.proto 已改为扁平 Mixture 列表。
 message Mixture{
     repeated MixtureItem Items = 1; // 混装面信息列表
 }

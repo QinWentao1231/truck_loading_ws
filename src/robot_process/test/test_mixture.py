@@ -130,7 +130,8 @@ class MixturePlacementTest(unittest.TestCase):
 
     def test_all_mixture_area_cfg_are_fixed_to_one(self):
         cfg = make_mixture_config()
-        # 两抓放在同一层时，通用左右排序原本会得到 1/3；混装面必须全部固定为 1。
+        # 遗留断言：这里仍验证早期“混装全部为1”的规则；当前实现会把符合
+        # 墙边收尾条件的第二抓标为4，后续应单独迁移此测试的名称和期望值。
         cfg['mixture'][0]['Items'][1]['Pos']['Z'] = 0
         rp = RobotPosition(cfg)
         self.assertEqual([box['area_cfg'] for box in rp.boxes], [1, 1])

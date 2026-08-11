@@ -1,3 +1,10 @@
+"""垛序动作生成与箱体碰撞环境。
+
+``RobotPosition`` 把 regular、trapezoid 或 mixture block 展开为逐抓动作和来料配方；
+``BinEnv`` 把已放动作转换为真实/外扩 AABB，用于路径、侧向间隙和混装物理支撑
+检查。该模块的长度统一使用毫米。
+"""
+
 import copy
 import logging
 import math
@@ -24,6 +31,7 @@ def _decode_mixture_placement(box_type, encoded_num):
 
 
 def _mixture_box_count(mixture_face):
+    """统计一个混装面的真实箱数，去除 P3 数量编码中的十位标志。"""
     return sum(
         _decode_mixture_placement(
             item.get('Type', item.get('type', '')),
@@ -34,8 +42,10 @@ def _mixture_box_count(mixture_face):
 
 
 class Box:
+    """按放置姿态保存单箱尺寸和左下前角位置。"""
 
     def __init__(self, l, w, h, rotation_type, position):
+        """创建箱体；rotation_type 0/1/2 分别表示原向、平转和 P3 侧立。"""
         if rotation_type == 0:
             self.length = l
             self.width = w
@@ -59,7 +69,8 @@ class RobotPosition:
     仅对应字段会被读取和解析。"""
 
     def __init__(self, config_data):
-        # box
+        """读取单个 block 配置并立即生成完整的逐抓队列。"""
+        # 箱型尺寸会叠加订单中的 reserve，后续动作和碰撞环境均使用有效尺寸。
         self.box_configs = config_data['box']
         self.box_type = config_data['box_list'][0]
         box_cfg = self.box_configs[self.box_type]
@@ -73,7 +84,7 @@ class RobotPosition:
         self.grab_num_p1 = grip['P1'][0] if grip.get('P1') else 4
         self.grab_num_p2 = grip['P2'][0] if grip.get('P2') else 2
         self.grab_num_p3 = grip['P3'][0] if grip.get('P3') else 2
-        # car
+        # 车厢尺寸和侧向预留，单位均为毫米。
         self.L = round(config_data['car']['size']['L'])
         self.W = round(config_data['car']['size']['W'])
         self.H = round(config_data['car']['size']['H'])
@@ -165,8 +176,8 @@ class RobotPosition:
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
         boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；箱型信号（+10）：
-          - 20x 箱型：任意区域 +10
-          - 10x / 30x 箱型：仅 P3 区域 +10
+          - 20x / 30x 箱型：任意区域 +10
+          - 10x 箱型：仅 P3 区域 +10
         box_num_signal 非空时，boxes 中保留该原始数字供 cmd_get_box 下发。
         """
         self._id += 1
@@ -572,6 +583,8 @@ class RobotPosition:
                 # 接口与内部坐标一致：X=车深、Y=车宽、Z=车高。
                 internal_pos = [pos_x, pos_y, pos_z]
                 center_y = pos_y + actual_num * y_span * 0.5
+                # 这里只生成失败回退用的初始方向；cmd_get_path 会结合当时已经
+                # 码放的空间邻箱和左右间隙，动态修正混装 P1 抓的实际方向。
                 dir_ = 1 if center_y <= self.W * 0.5 else 2
                 self._emit(
                     area, actual_num, num_F, dir_, internal_pos,
@@ -723,6 +736,7 @@ class RobotPosition:
         self.ori_offsets = self.robot_offsets.copy()
 
     def cal_floor_count(self):
+        """返回当前来料所属面的总抓数；无待处理来料时返回1。"""
         if len(self.boxes) == 0:
             return 1
         x = self.boxes[0]['num_F']
@@ -741,8 +755,10 @@ class RobotPosition:
 
 
 class BinEnv:
+    """维护当前码垛面的箱体 AABB，并提供路径与支撑检查。"""
 
     def __init__(self, config_data):
+        """读取安全余量和混装诊断参数，初始化空环境。"""
         self.reserve_grip = config_data['reserve_grip']
         self.reserve_object = config_data['reserve_object']
         self.mixture_z_overlap_min = float(
@@ -753,10 +769,12 @@ class BinEnv:
             config_data.get('mixture_support_min_ratio', 0.80))
         self.mixture_support_min_box_ratio = float(
             config_data.get('mixture_support_min_box_ratio', 0.60))
-        self.objects = []          # 含 reserve_object 外扩的包围盒，用于碰撞检测
-        self.display_objects = []  # 真实尺寸的箱体，用于可视化
+        # 面积阈值随支撑结果输出，当前只作诊断；风险由重心稳定性判定。
+        self.objects = []          # 含 reserve_object 外扩的 AABB，用于安全段碰撞检测
+        self.display_objects = []  # 真实尺寸 AABB，用于落箱段、支撑分析和可视化
 
     def reset(self):
+        """清空当前面的安全 AABB 与真实 AABB。"""
         self.objects = []
         self.display_objects = []
 
@@ -923,6 +941,7 @@ class BinEnv:
             return points
 
         def _cross(origin, first, second):
+            """返回二维三点转向的有符号叉积。"""
             return (
                 (first[0] - origin[0]) * (second[1] - origin[1]) -
                 (first[1] - origin[1]) * (second[0] - origin[0]))
@@ -1225,12 +1244,15 @@ class BinEnv:
             self.display_objects.clear()
 
     def render(self):
+        """保留的环境渲染接口；当前可视化由 plotting 模块完成。"""
         pass
 
 
 class Node:
+    """保留给二维搜索算法使用的轻量节点结构。"""
 
     def __init__(self, x, y):
+        """创建坐标为 ``(x, y)``、代价为0且无父节点的节点。"""
         self.x = x
         self.y = y
         self.cost = 0.0

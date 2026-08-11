@@ -1,9 +1,12 @@
+"""旧版角点 TCP 客户端及固定响应帧解析工具。"""
+
 import socket
 import struct
 import math
 
 
 def create_tcp_client(server_ip, server_port, message_bytes):
+    """发送一次请求并解析角点响应；失败时返回零偏移和零角点数。"""
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     dis_y, dis_x, count = 0.0, 0.0, 0
     try:
@@ -24,10 +27,11 @@ def create_tcp_client(server_ip, server_port, message_bytes):
 
 
 def parse_data(data):
-    # 假设接收到的数据是一串16进制字节流，例如：b'\x01\x02\x03\x04\x05\x06\x07\x08'
-    # 并且每个变量占用固定的字节数，例如每个变量占用2个字节
+    """按旧版固定偏移解析最多四个角点，返回 ``(dis_y, dis_x, count)``。
 
-    # 将字节转换为整数或其他需要的类型
+    角点坐标使用网络字节序 float32；四角点时返回 corner1 与 corner4 的
+    X/Y 轴差，两角点时 ``dis_y`` 返回 corner1 到 corner2 的三维距离。
+    """
     count = data[40]
     corner1x = struct.unpack('!f', data[41:45])
     corner1y = struct.unpack('!f', data[45:49])
