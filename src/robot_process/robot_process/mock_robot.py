@@ -24,7 +24,6 @@ _ACT_LABEL   = {1: 'normal', 2: 'face_end', 3: 'block_end', 4: 'all_end'}
 _AREA_LABEL  = {1: 'p1', 2: 'p2', 3: 'p3'}
 
 _STACK_LABEL = {1: '有结果', 2: '异常'}
-_CHK_LABEL   = {1: '通过', 2: '失败'}
 
 MENU = """
 ┌──────────────────────────────────────────┐
@@ -125,12 +124,18 @@ def handle_get_path(sock):
 
 
 def handle_chk_path(sock):
-    """触发服务端批量路径检查并打印最终状态。"""
+    """触发前置检查并解析“路径/垛序/PLC”三位状态。"""
     sock.sendall(CMD_CHK_PATH)
     _, blocks = recv_response(sock)
     status = int(parse_floats(blocks[0], 1)[0])
-    status_text = _CHK_LABEL.get(status, f'未知状态 {status}')
-    print(f"  chk_path 整体结果={status}（{status_text}）")
+    digits = str(status)
+    if len(digits) == 3 and all(value in '12' for value in digits):
+        labels = ['通过' if value == '1' else '失败' for value in digits]
+        print(
+            f"  chk_path={status}（路径={labels[0]}，垛序={labels[1]}，"
+            f"PLC={labels[2]}）")
+    else:
+        print(f"  chk_path 返回未知状态={status}")
 
 
 def handle_stacking(sock):

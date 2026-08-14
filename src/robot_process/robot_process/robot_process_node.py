@@ -14,6 +14,7 @@ import time
 import struct
 import json
 import pickle
+import copy
 import logging
 import numpy as np
 from rrt_env.environment_3D import BinEnv, RobotPosition
@@ -37,7 +38,7 @@ cmd_get_pallet    = 'fefe0000010100000000000000000000'  # 请求垛型总体信�
 cmd_get_per_count = 'fefe0000010200000000000000000000'  # 请求当前码垛面箱数
 cmd_get_box       = 'fefe0000010300000000000000000000'  # 请求下一箱来料配方
 cmd_get_path      = 'fefe0000010400000000000000000000'  # 请求下一抓放置路径
-cmd_chk_path      = 'fefe0000010500000000000000000000'  # 批量检查剩余路径（仅返回整体状态）
+cmd_chk_path      = 'fefe0000010500000000000000000000'  # 独立批量前置检查（返回三位整体状态）
 cmd_stacking      = 'fefe0000010600000000000000000000'  # 触发堆叠检测（双雷达采集+宽度计算）
 
 # ── 响应报文头（服务端→机器人）────────────────────────────────────────
@@ -292,8 +293,8 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
     return paths
 
 
-def _save_parsed_order(config_rp, rp_list, source='online'):
-    """垛序构造成功后保存规范化订单字段；仅接收阶段不调用。"""
+def _save_parsed_order(config_rp, rp_list, source='online', raw_order=None):
+    """垛序构造成功后保存规范化结果及完整原始 answer/condition。"""
     now_text = time.strftime('%Y-%m-%d %H:%M:%S')
     day_text = time.strftime('%Y%m%d')
     stamp = (
@@ -322,6 +323,14 @@ def _save_parsed_order(config_rp, rp_list, source='online'):
         'schema_version': 1,
         'parsed_at': now_text,
         'source': source,
+        # 在线订单保留规划器下发的完整原始内容，便于复现 PLC 字段、箱型
+        # 条件与垛型之间的问题；不能取得原始请求的离线/续传模式写 null。
+        'answer': (
+            copy.deepcopy(raw_order.get('answer'))
+            if isinstance(raw_order, dict) else None),
+        'condition': (
+            copy.deepcopy(raw_order.get('condition'))
+            if isinstance(raw_order, dict) else None),
         'block_count': len(rp_list),
         'total_box_count': sum(item['box_count'] for item in block_summaries),
         'total_grab_count': sum(item['grab_count'] for item in block_summaries),
@@ -333,6 +342,26 @@ def _save_parsed_order(config_rp, rp_list, source='online'):
     with open(output_path, 'w', encoding='utf-8') as file:
         json.dump(record, file, ensure_ascii=False, indent=2)
     return output_path
+
+
+def _protobuf_order_to_dict(request):
+    """完整转换 gRPC IssueRequest，兼容不同 protobuf 版本的默认值参数。"""
+    from google.protobuf.json_format import MessageToDict
+
+    common = {'preserving_proto_field_name': True}
+    try:
+        request_dict = MessageToDict(
+            request, always_print_fields_with_no_presence=True, **common)
+    except TypeError:
+        try:
+            request_dict = MessageToDict(
+                request, including_default_value_fields=True, **common)
+        except TypeError:
+            request_dict = MessageToDict(request, **common)
+    return {
+        'answer': request_dict.get('answer', {}),
+        'condition': request_dict.get('condition', {}),
+    }
 
 
 def _collect_mixture_fields(config_rp):
@@ -364,12 +393,461 @@ def _collect_mixture_fields(config_rp):
     return result
 
 
+_SPECIAL_IND_FIELDS = (
+    'Nt', 'BoxType', 'BoxNum', 'BoxP3Sum', 'BoxP3IndNum', 'BoxP3Ind',
+    'BoxRightSum', 'BoxRightNum', 'BoxRightInd',
+)
+
+# test.proto 等早期接口把右翻数组命名为 BoxP1Right*。字段号和语义与
+# answer.proto 的 BoxRight* 一致，因此只在接收边界归一化，内部统一使用新名称。
+_SPECIAL_IND_FIELD_ALIASES = {
+    'BoxRightSum': ('BoxP1RightSum',),
+    'BoxRightNum': ('BoxP1RightIndNum',),
+    'BoxRightInd': ('BoxP1RightInd',),
+}
+
+
+def _special_ind_value(src, name):
+    """按现行名称读取 SpecialInd 字段，并兼容旧接口别名和 JSON 小驼峰。"""
+    candidates = (name, name[:1].lower() + name[1:])
+    for alias in _SPECIAL_IND_FIELD_ALIASES.get(name, ()):
+        candidates += (alias, alias[:1].lower() + alias[1:])
+    if isinstance(src, dict):
+        for candidate in candidates:
+            if candidate in src:
+                return src[candidate]
+        return None
+    for candidate in candidates:
+        value = getattr(src, candidate, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _normalize_special_ind(src):
+    """把新旧 JSON/protobuf SpecialInd 归一化为现行字段字典。"""
+    if src is None:
+        return None
+    result = {}
+    for name in _SPECIAL_IND_FIELDS:
+        value = _special_ind_value(src, name)
+        if value is None:
+            continue
+        if name in ('BoxType',):
+            result[name] = [str(item) for item in value]
+        elif name in ('BoxNum', 'BoxP3IndNum', 'BoxP3Ind',
+                      'BoxRightNum', 'BoxRightInd'):
+            result[name] = [int(item) for item in value]
+        else:
+            result[name] = int(value)
+    return result
+
+
+def _special_ind_from_proto(answer):
+    """读取 Answer 的 PLC 字段，兼容现行 ``SpecialInd`` 和旧版 ``sInd``。"""
+    for field_name in ('SpecialInd', 'specialInd', 'sInd'):
+        src = getattr(answer, field_name, None)
+        if src is None:
+            continue
+        try:
+            if hasattr(answer, 'HasField') and not answer.HasField(field_name):
+                continue
+        except (ValueError, TypeError):
+            # 某些旧版动态 protobuf 不提供 message presence，继续按属性读取。
+            pass
+        return _normalize_special_ind(src)
+    return None
+
+
+def _special_ind_from_json(answer):
+    """读取规划器 JSON 中的 SpecialInd，兼容小驼峰和旧版 sInd。"""
+    if not isinstance(answer, dict):
+        return None
+    src = answer.get(
+        'SpecialInd', answer.get('specialInd', answer.get('sInd')))
+    return _normalize_special_ind(src)
+
+
+def _get_special_ind(config_rp):
+    """从内部 block 配置中取出随订单保存的 PLC SpecialInd。"""
+    blocks = config_rp if isinstance(config_rp, list) else [config_rp]
+    for block in blocks:
+        if isinstance(block, dict) and block.get('_plc_special_ind') is not None:
+            return _normalize_special_ind(block['_plc_special_ind'])
+    return None
+
+
+def _log_special_ind_overview(special_ind, answer=None):
+    """记录PLC数组数量，并突出声明值与数组长度不一致的问题。"""
+    if special_ind is None:
+        set_fields = []
+        field3_name = '未知'
+        try:
+            if isinstance(answer, dict):
+                set_fields = sorted(answer.keys())
+            elif answer is not None:
+                set_fields = [field.name for field, _ in answer.ListFields()]
+                descriptor = getattr(answer, 'DESCRIPTOR', None)
+                if descriptor is not None:
+                    field3 = descriptor.fields_by_number.get(3)
+                    if field3 is not None:
+                        field3_name = field3.name
+        except Exception:
+            # 诊断信息获取失败不能影响订单接收。
+            pass
+        logs.warning(
+            '订单未提供 answer.SpecialInd/sInd；'
+            f'已设置Answer字段={set_fields or "无"}，字段3定义={field3_name}')
+        return
+    p3_len = len(special_ind.get('BoxP3Ind', []))
+    right_len = len(special_ind.get('BoxRightInd', []))
+    p3_sum = int(special_ind.get('BoxP3Sum', 0))
+    right_sum = int(special_ind.get('BoxRightSum', 0))
+    logs.info(
+        f"[PLC-ORDER] Nt={special_ind.get('Nt', 0)}，"
+        f"BoxP3Ind={p3_len}项(BoxP3Sum={p3_sum})，"
+        f"BoxRightInd={right_len}项(BoxRightSum={right_sum})")
+    if p3_sum != p3_len:
+        logs.warning(
+            f'[PLC-ORDER] BoxP3Sum={p3_sum} 与 BoxP3Ind长度={p3_len}不一致')
+    if right_sum != right_len:
+        logs.warning(
+            f'[PLC-ORDER] BoxRightSum={right_sum} '
+            f'与 BoxRightInd长度={right_len}不一致')
+
+
+def _expected_box_signal(action):
+    """由 get_path 动作反推 cmd_get_box 应下发的数量编码。"""
+    actual_num = int(sum(action['num']))
+    box_prefix = str(action.get('box_type', ''))[:1]
+    no_turn_signal = (
+        box_prefix in ('2', '3')
+        or (box_prefix == '1' and action['area'] == 'p3')
+    )
+    return actual_num + 10 if no_turn_signal else actual_num
+
+
+def _expected_area_cfg_map(rp_item):
+    """由 get_path 动作布局推导每抓应下发的 ``area_cfg``。
+
+    常规/梯形垛按同面、同区域、同高度的 Y 顺序得到左/中/右位置码；
+    尾料和 P3 固定为1，两抓行的执行末抓在位置码上加10。混装面则按
+    ``RobotPosition`` 的三维邻箱规则推导墙边收尾码4。推导过程不读取
+    ``box['area_cfg']``，用于校验 cmd_get_box 队列中的实际发送值。
+    """
+    actions = [item for item in rp_item.ori_offsets if item != 'done']
+    boxes_by_id = {
+        int(box['id']): box for box in rp_item.boxes if 'id' in box
+    }
+
+    if rp_item.block_type == 'mixture':
+        return {
+            int(action_id): int(value)
+            for action_id, value in rp_item._mixture_area_cfg_map().items()
+        }
+
+    groups = {}
+    for action in actions:
+        key = (action['num_F'], action['area'], action['pos'][2])
+        groups.setdefault(key, []).append(action)
+
+    position_codes = {}
+    for grouped_actions in groups.values():
+        ordered = sorted(grouped_actions, key=lambda item: item['pos'][1])
+        for rank, action in enumerate(ordered):
+            if len(ordered) == 1 or rank == 0:
+                value = 1
+            elif rank == len(ordered) - 1:
+                value = 3
+            else:
+                value = 2
+            position_codes[int(action['id'])] = value
+
+    result = {}
+    for action in actions:
+        action_id = int(action['id'])
+        box = boxes_by_id.get(action_id, {})
+        if box.get('is_tail') or action['area'] == 'p3':
+            value = 1
+        else:
+            value = position_codes.get(action_id, 1)
+        if box.get('is_two_grab_row_last'):
+            value += 10
+        result[action_id] = value
+    return result
+
+
+def _format_index_ranges(values):
+    """把连续箱序号压缩为 ``430-439`` 形式，避免异常日志刷屏。"""
+    values = sorted(set(int(value) for value in values))
+    if not values:
+        return '无'
+    ranges = []
+    start = previous = values[0]
+    for value in values[1:]:
+        if value == previous + 1:
+            previous = value
+            continue
+        ranges.append(
+            str(start) if start == previous else f'{start}-{previous}')
+        start = previous = value
+    ranges.append(
+        str(start) if start == previous else f'{start}-{previous}')
+    return ','.join(ranges)
+
+
+def _validate_order_alignment(rp_list, config_rp=None):
+    """校验 cmd_get_box 垛序与 cmd_get_path 动作是否逐抓一一对应。"""
+    issues = []
+    mismatch_grabs = []
+    total_boxes = 0
+    total_grabs = 0
+    block_reports = []
+
+    for block_index, rp_item in enumerate(rp_list, start=1):
+        actions = [item for item in rp_item.ori_offsets if item != 'done']
+        boxes = list(rp_item.boxes)
+        expected_area_cfg = _expected_area_cfg_map(rp_item)
+        total_grabs += len(actions)
+        block_box_count = sum(int(sum(action['num'])) for action in actions)
+        total_boxes += block_box_count
+        block_issues = []
+
+        if len(actions) != len(boxes):
+            block_issues.append(
+                f'get_path抓数={len(actions)}，get_box抓数={len(boxes)}')
+
+        for grab_index, (action, box) in enumerate(
+                zip(actions, boxes), start=1):
+            fields = []
+
+            def compare(field, path_value, box_value):
+                if path_value != box_value:
+                    fields.append({
+                        'field': field,
+                        'get_path': path_value,
+                        'get_box': box_value,
+                    })
+
+            compare('id', int(action['id']), int(box['id']))
+            compare('area', action['area'], box.get('area'))
+            compare('face', int(action['num_F']), int(box.get('num_F', -1)))
+            compare('action', int(action['action']), int(box.get('action', -1)))
+            compare(
+                'box_type', str(action.get('box_type', rp_item.box_type)),
+                str(box.get('box_type', rp_item.box_type)))
+            compare('box_signal', _expected_box_signal(action), int(box['num']))
+            compare(
+                'area_cfg', int(expected_area_cfg.get(int(action['id']), 1)),
+                int(box.get('area_cfg', -1)))
+
+            path_size = [round(float(value), 4) for value in action['size']]
+            box_size = [round(float(value), 4)
+                        for value in box.get('size', [])]
+            compare('size', path_size, box_size)
+            if fields:
+                mismatch_grabs.append({
+                    'block': block_index,
+                    'grab': grab_index,
+                    'action_id': int(action['id']),
+                    'fields': fields,
+                })
+
+        if block_box_count != int(rp_item.box_count):
+            block_issues.append(
+                f'路径实际箱数={block_box_count}，垛型声明箱数={rp_item.box_count}')
+        if block_issues:
+            issues.extend(
+                f'Block {block_index}: {issue}' for issue in block_issues)
+        block_reports.append({
+            'block': block_index,
+            'block_type': rp_item.block_type,
+            'path_grabs': len(actions),
+            'box_grabs': len(boxes),
+            'box_count': block_box_count,
+            'declared_box_count': int(rp_item.box_count),
+            'issues': block_issues,
+        })
+
+    if mismatch_grabs:
+        issues.append(f'{len(mismatch_grabs)} 抓 get_box/get_path 字段不一致')
+
+    blocks = config_rp if isinstance(config_rp, list) else [config_rp]
+    declared_ns = None
+    if blocks and isinstance(blocks[0], dict):
+        index = blocks[0].get('index') or {}
+        if index.get('Ns') is not None:
+            declared_ns = int(index['Ns'])
+            if declared_ns > 0 and declared_ns != total_boxes:
+                issues.append(
+                    f'整车路径箱数={total_boxes}，垛型 Index.Ns={declared_ns}')
+
+    return {
+        'passed': not issues,
+        'total_grabs': total_grabs,
+        'total_boxes': total_boxes,
+        'declared_ns': declared_ns,
+        'issues': issues,
+        'mismatch_grabs': mismatch_grabs,
+        'blocks': block_reports,
+    }
+
+
+def _validate_plc_indices(rp_list, special_ind):
+    """按垛序箱序号校验 PLC 的 BoxP3Ind 与 BoxRightInd。
+
+    ``BoxP3Ind`` 实际表示“不翻转”：1XX 的 P3，以及 2XX/3XX 的
+    P1/P3。``BoxRightInd`` 只需记录仍可能翻转的 1XX P1 行内最右抓；
+    混装 block 明确排除，不参与最右抓判断。
+    """
+    action_records = []
+    next_box_id = 1
+    for block_index, rp_item in enumerate(rp_list, start=1):
+        actions = [item for item in rp_item.ori_offsets if item != 'done']
+        for action in actions:
+            actual_num = int(sum(action['num']))
+            box_ids = list(range(next_box_id, next_box_id + actual_num))
+            next_box_id += actual_num
+            action_records.append({
+                'block': block_index,
+                'block_type': rp_item.block_type,
+                'action': action,
+                'box_ids': box_ids,
+            })
+
+    # 规则/梯形垛中，同面、同高度、同箱型的 P1 行至少有两抓时，Y 最大
+    # 的那一抓是最右抓。混装面不做该推断。
+    row_groups = {}
+    for record in action_records:
+        action = record['action']
+        box_prefix = str(action.get('box_type', ''))[:1]
+        if (record['block_type'] == 'mixture'
+                or box_prefix != '1' or action['area'] != 'p1'):
+            continue
+        key = (
+            record['block'], int(action['num_F']),
+            round(float(action['pos'][2]), 4),
+            str(action.get('box_type', '')),
+        )
+        row_groups.setdefault(key, []).append(record)
+    right_record_keys = set()
+    for records in row_groups.values():
+        if len(records) < 2:
+            continue
+        rightmost = max(records, key=lambda item: float(item['action']['pos'][1]))
+        right_record_keys.add(
+            (rightmost['block'], int(rightmost['action']['id'])))
+
+    expected_p3 = []
+    expected_right = []
+    for record in action_records:
+        action = record['action']
+        prefix = str(action.get('box_type', ''))[:1]
+        if ((prefix == '1' and action['area'] == 'p3')
+                or (prefix in ('2', '3')
+                    and action['area'] in ('p1', 'p3'))):
+            expected_p3.extend(record['box_ids'])
+        if ((record['block'], int(action['id'])) in right_record_keys):
+            expected_right.extend(record['box_ids'])
+
+    if special_ind is None:
+        return {
+            'passed': False,
+            'available': False,
+            'issues': ['订单未提供 answer.SpecialInd，无法校验 PLC 字段'],
+            'expected': {
+                'BoxP3Ind': expected_p3,
+                'BoxRightInd': expected_right,
+            },
+            'received': None,
+        }
+
+    received_p3 = [int(value) for value in special_ind.get('BoxP3Ind', [])]
+    received_right = [int(value)
+                      for value in special_ind.get('BoxRightInd', [])]
+    comparisons = {}
+    issues = []
+    for name, expected, received in (
+            ('BoxP3Ind', expected_p3, received_p3),
+            ('BoxRightInd', expected_right, received_right)):
+        expected_set = set(expected)
+        received_set = set(received)
+        missing = sorted(expected_set - received_set)
+        unexpected = sorted(received_set - expected_set)
+        seen = set()
+        duplicate = set()
+        for value in received:
+            if value in seen:
+                duplicate.add(value)
+            seen.add(value)
+        duplicate = sorted(duplicate)
+        order_matches = expected == received
+        comparisons[name] = {
+            'passed': order_matches,
+            'expected_count': len(expected),
+            'received_count': len(received),
+            'missing': missing,
+            'unexpected': unexpected,
+            'duplicates': duplicate,
+        }
+        if not order_matches:
+            order_note = (
+                '，序列顺序不一致'
+                if not missing and not unexpected and not duplicate else '')
+            issues.append(
+                f'{name}不一致：期望{len(expected)}个，收到{len(received)}个，'
+                f'缺少={_format_index_ranges(missing)}，'
+                f'多出={_format_index_ranges(unexpected)}，'
+                f'重复={_format_index_ranges(duplicate)}{order_note}')
+
+    return {
+        'passed': not issues,
+        'available': True,
+        'issues': issues,
+        'expected': {
+            'BoxP3Ind': expected_p3,
+            'BoxRightInd': expected_right,
+        },
+        'received': special_ind,
+        'comparisons': comparisons,
+        'declared_consistency': {
+            'Nt_matches': int(special_ind.get('Nt', 0)) == next_box_id - 1,
+            'BoxNumSum_matches_Nt': sum(
+                int(value) for value in special_ind.get('BoxNum', []))
+            == int(special_ind.get('Nt', 0)),
+            'BoxP3Sum_matches_array': int(special_ind.get('BoxP3Sum', 0))
+            == len(received_p3),
+            'BoxP3IndNumSum_matches_array': sum(
+                int(value) for value in special_ind.get('BoxP3IndNum', []))
+            == len(received_p3),
+            'BoxRightSum_matches_array': int(
+                special_ind.get('BoxRightSum', 0)) == len(received_right),
+            'BoxRightNumSum_matches_array': sum(
+                int(value) for value in special_ind.get('BoxRightNum', []))
+            == len(received_right),
+        },
+    }
+
+
 def _write_chk_path_summary(session):
-    """将 cmd_chk_path 批量检查结果写入 TXT/JSON，并返回统计信息。"""
+    """汇总路径、垛序、PLC三类检查，并生成三位 float 状态码。"""
     results = session['results']
     abnormal = [item for item in results if item['issues']]
     system_issues = session.get('system_issues', [])
-    status = 2 if abnormal or system_issues else 1
+    path_passed = not abnormal and not system_issues and not session.get(
+        'path_forced_failed', False)
+    order_validation = session.get('order_validation') or {
+        'passed': False, 'issues': ['垛序校验未执行']}
+    plc_validation = session.get('plc_validation') or {
+        'passed': False, 'issues': ['PLC字段校验未执行']}
+    status_digits = {
+        'path': 1 if path_passed else 2,
+        'order': 1 if order_validation.get('passed') else 2,
+        'plc': 1 if plc_validation.get('passed') else 2,
+    }
+    status = int(
+        f'{status_digits["path"]}{status_digits["order"]}'
+        f'{status_digits["plc"]}')
     output_dir = session.get('output_dir')
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -383,10 +861,15 @@ def _write_chk_path_summary(session):
         'finished_at': time.strftime('%Y-%m-%d %H:%M:%S'),
         'output_dir': output_dir,
         'session_log_path': session.get('log_path'),
+        'order_archive_path': session.get('order_archive_path'),
         'total_grabs': len(results),
         'normal_grabs': len(results) - len(abnormal),
         'abnormal_grabs': len(abnormal),
+        'path_forced_failed': bool(session.get('path_forced_failed', False)),
         'status': status,
+        'status_digits': status_digits,
+        'order_validation': order_validation,
+        'plc_validation': plc_validation,
         'path_htmls': session.get('path_htmls', []),
         'face_images': session.get('face_images', []),
         'system_issues': system_issues,
@@ -399,14 +882,17 @@ def _write_chk_path_summary(session):
         json.dump(summary, file, ensure_ascii=False, indent=2)
 
     lines = [
-        'cmd_chk_path 路径检查汇总',
+        'cmd_chk_path 前置检查汇总',
         f'开始时间: {summary["started_at"]}',
         f'结束时间: {summary["finished_at"]}',
         f'会话目录: {summary["output_dir"]}',
         f'独立日志: {summary["session_log_path"]}',
+        f'完整订单归档: {summary["order_archive_path"]}',
         f'总抓数: {summary["total_grabs"]}',
         f'正常抓数: {summary["normal_grabs"]}',
         f'异常抓数: {summary["abnormal_grabs"]}',
+        ('三位状态: 路径={path} / 垛序={order} / PLC={plc}'
+         .format(**status_digits)),
         f'返回状态: float {summary["status"]}',
     ]
     if abnormal:
@@ -416,8 +902,36 @@ def _write_chk_path_summary(session):
                 f'  Block {item["block"]} / 面 {item["face"]} / '
                 f'第 {item["grab"]} 抓 / 箱型 {item["box_type"]}: '
                 + '；'.join(item['issues']))
+    elif session.get('path_forced_failed', False):
+        lines.append('路径检查: 未能完成')
     else:
-        lines.append('检查结果: 未发现异常')
+        lines.append('路径检查: 未发现异常')
+    if not order_validation.get('passed'):
+        lines.append('垛序异常:')
+        lines.extend(
+            f'  {issue}' for issue in order_validation.get('issues', []))
+        for mismatch in order_validation.get('mismatch_grabs', []):
+            field_names = ', '.join(
+                field['field'] for field in mismatch.get('fields', []))
+            lines.append(
+                f'  Block {mismatch["block"]} / 第 {mismatch["grab"]} 抓 '
+                f'(action_id={mismatch["action_id"]}): {field_names}')
+    else:
+        lines.append(
+            f'垛序检查: 通过（{order_validation.get("total_grabs", 0)}抓 / '
+            f'{order_validation.get("total_boxes", 0)}箱）')
+    if not plc_validation.get('passed'):
+        lines.append('PLC字段异常:')
+        lines.extend(
+            f'  {issue}' for issue in plc_validation.get('issues', []))
+    else:
+        lines.append('PLC字段检查: BoxP3Ind、BoxRightInd均通过')
+    plc_consistency = plc_validation.get('declared_consistency', {})
+    plc_consistency_issues = [
+        name for name, passed in plc_consistency.items() if not passed]
+    if plc_consistency_issues:
+        lines.append('PLC附加一致性告警（不改变三位状态）:')
+        lines.extend(f'  {name}=false' for name in plc_consistency_issues)
     if summary['mixture_fields']:
         lines.append('收到的mixture字段:')
         lines.extend(json.dumps(
@@ -442,11 +956,14 @@ def _log_chk_path_summary(summary, logger):
     logger.info('========== cmd_chk_path 检查汇总 ==========')
     warning_section = False
     for line in summary.get('report_lines', []):
-        if line in ('异常定位:', '非路径异常:'):
+        if line in (
+                '异常定位:', '垛序异常:', 'PLC字段异常:',
+                'PLC附加一致性告警（不改变三位状态）:', '非路径异常:'):
             warning_section = True
             logger.warning(line)
             continue
-        if line in ('收到的mixture字段:', '可视化文件:'):
+        if (line in ('收到的mixture字段:', '可视化文件:')
+                or line.startswith(('垛序检查:', 'PLC字段检查:'))):
             warning_section = False
         if warning_section:
             logger.warning(line)
@@ -628,8 +1145,12 @@ def _parse_mixture_json(src_list):
 def parse_planner_json(data: dict):
     """解析规划器 JSON 格式响应，产出与 callback() 相同的 glob_data 列表。
     Stack/Group 项为 dict 格式：{"Width": [...]} / {"Unit": [...]}"""
-    global glob_data
+    global glob_data, glob_raw_order
     try:
+        raw_order = {
+            'answer': copy.deepcopy(data['answer']),
+            'condition': copy.deepcopy(data['condition']),
+        }
         cond     = data['condition']
         car_orig = cond['car']['original']
         car_rsv  = cond['car']['reserve']
@@ -655,14 +1176,16 @@ def parse_planner_json(data: dict):
                         'Nt': box.get('Nt', 0),
                     }
 
-        idx = data['answer']['index']
+        answer_data = data['answer']
+        special_ind = _special_ind_from_json(answer_data)
+        idx = answer_data['index']
         index_info = {
             'Ns': idx['Ns'], 'Us': idx['Us'], 'Um': idx['Um'],
             'Gn': list(idx.get('Gn', [])), 'Tp': idx.get('Tp', 0),
         }
 
         glob_data = []
-        for blk in data['answer']['blocks']:
+        for blk in answer_data['blocks']:
             # 收集 block 内所有用到的箱型
             all_items = blk.get('regular', []) + blk.get('trapezoid', []) + blk.get('mixture', [])
             blk_types = []
@@ -720,10 +1243,15 @@ def parse_planner_json(data: dict):
                 'trapezoid': trapezoid,
                 'mixture':   mixture,
                 'index':     index_info,
+                # SpecialInd 属于 Answer 级字段；仅挂到首个 block，既能随
+                # 计划持久化，又避免在订单归档中重复保存大数组。
+                '_plc_special_ind': special_ind if not glob_data else None,
             })
     except Exception as e:
         logs.error(f"解析垛型JSON失败: {e}")
         return False, "receive failed!"
+    glob_raw_order = raw_order
+    _log_special_ind_overview(special_ind, answer_data)
     logs.info("已接受垛型数据，请将机器人进行连接或重新下发垛型数据")
     return True, "receive succeed!"
 
@@ -734,7 +1262,14 @@ def callback(data):
     解析开始时会清空 ``glob_data``，随后逐个 block 重建；解析异常时可能留下
     尚未完成的中间列表并返回失败应答，因此调用方只应在成功应答后使用新垛型。
     """
-    global glob_data
+    global glob_data, glob_raw_order
+    raw_order = None
+    try:
+        raw_order = _protobuf_order_to_dict(data)
+    except Exception as raw_error:
+        # 原始请求归档失败不能改变接口解析结果；垛序成功后会明确记录缺失。
+        logs.warning(
+            f"完整answer/condition转换失败，将只保存规范化字段: {raw_error}")
     try:
         car_orig = data.condition.car.original
         car_rsv  = data.condition.car.reserve
@@ -756,14 +1291,16 @@ def callback(data):
                     }
 
         # 全局统计参数（Answer 级别，所有 block 共享）
-        idx = data.answer.index
+        answer = data.answer
+        special_ind = _special_ind_from_proto(answer)
+        idx = answer.index
         index_info = {
             'Ns': idx.Ns, 'Us': idx.Us, 'Um': idx.Um,
             'Gn': list(idx.Gn), 'Tp': idx.Tp,
         }
         # 每个 block 按 Type 收集箱型信息
         glob_data = []
-        for blk in data.answer.blocks:
+        for blk in answer.blocks:
             all_items = list(blk.regular) + list(blk.trapezoid) + list(blk.mixture)
             blk_types = []
             for x in all_items:
@@ -786,10 +1323,13 @@ def callback(data):
                 'trapezoid': _parse_trapezoid(blk.trapezoid),
                 'mixture':   _parse_mixture(blk.mixture),
                 'index':     index_info,
+                '_plc_special_ind': special_ind if not glob_data else None,
             })
     except Exception as e:
         logs.error(f"解析垛型失败: {e}")
         return False, "receive failed!"
+    glob_raw_order = raw_order
+    _log_special_ind_overview(special_ind, answer)
     logs.info("已接受垛型数据，请将机器人进行连接或重新下发垛型数据")
     return True, "receive succeed!"
 
@@ -845,7 +1385,7 @@ def _fast_forward(rp_list, be, cursor):
 
 def main():
     """启动主服务并循环处理机器人指令，单项任务异常由各自边界兜底记录。"""
-    global glob_data
+    global glob_data, glob_raw_order
     # 日志配置
     logs.info("***垛序及机器人路径规划程序启动 ver.0.5.6（支持混码）-alpha-for济南烟厂***")
     try:
@@ -886,6 +1426,7 @@ def main():
         if (resume_save or resume_on_restart) else None
     # 主循环
     while True:
+        raw_order = None
         # 断点续传：有未完成进度则跳过等待垛型，直接用磁盘保存的计划恢复
         resume_data = store.load() if (store and not off_line_mode and resume_on_restart) else None
         resume_cursor = None
@@ -911,6 +1452,7 @@ def main():
             # 在线读取垛型模式
             order_source = 'online'
             glob_data = None
+            glob_raw_order = None
             if 'svr' not in vars():
                 svr = GrpcServer(5007, callback)
                 svr.run()
@@ -927,6 +1469,7 @@ def main():
         # 停止接受垛型数据（仅在线、非续传时才启动过 gRPC）
         if not off_line_mode and not resume_data:
             config_rp = glob_data
+            raw_order = glob_raw_order
             svr.stop()
             del svr
             logs.info("停止接受垛型")
@@ -949,10 +1492,17 @@ def main():
             logs.error(f"垛序计算失败，请检查垛型数据: {e}")
             sys.exit(1)
         # 只有所有 Block 均成功构造 RobotPosition 后才保存；gRPC 仅接收时不落盘。
+        parsed_order_path = None
         try:
             parsed_order_path = _save_parsed_order(
-                config_rp, rp_list, source=order_source)
+                config_rp, rp_list, source=order_source,
+                raw_order=raw_order)
             logs.info(f"订单解析字段已保存: {parsed_order_path}")
+            if raw_order is not None:
+                logs.info("完整answer与condition已写入订单归档")
+            else:
+                logs.warning(
+                    "本次订单归档缺少原始answer/condition（离线、续传或转换失败）")
         except Exception as order_save_error:
             # 订单归档属于诊断信息，保存失败不能影响机器人主流程。
             logs.warning(f"订单解析字段保存失败，继续执行: {order_save_error}")
@@ -966,7 +1516,7 @@ def main():
         be.reset()
         dis_x = 0          # 角点激光补偿：x方向偏差（暂未使用）
         dis_y = 0          # 角点激光补偿：y方向偏差，用于修正 x_goal
-        # chk_value: 批量检查计数器，0=正常逐抓模式，>0=检查剩余抓次（cmd_chk_path触发）
+        # chk_value: 批量检查计数器，0=正常模式，>0=独立副本的待检查抓次。
         chk_value = 0
         # chk_session: cmd_chk_path 本轮逐抓结果、面级图片及最终汇总。
         chk_session = None
@@ -985,6 +1535,29 @@ def main():
         # cur_box_id/cur_path_id: 当前已下发的 box/path 抓号，每次"先存后发"写入游标
         cur_box_id = 0
         cur_path_id = 0
+
+        def _restore_chk_runtime(session):
+            """恢复 cmd_chk_path 启动前的正式执行状态。"""
+            nonlocal rp_list, rp_idx, rp, be
+            nonlocal last_grab_action, last_grab_box_type
+            nonlocal last_grab_car_width, last_grab_block_type
+            nonlocal last_grab_detection_gap, cur_box_id, cur_path_id
+            state = session.get('_runtime_state') if session else None
+            if state is None:
+                return
+            rp_list = state['rp_list']
+            rp_idx = state['rp_idx']
+            rp = state['rp']
+            be = state['be']
+            last_grab_action = state['last_grab_action']
+            last_grab_box_type = state['last_grab_box_type']
+            last_grab_car_width = state['last_grab_car_width']
+            last_grab_block_type = state['last_grab_block_type']
+            last_grab_detection_gap = state['last_grab_detection_gap']
+            cur_box_id = state['cur_box_id']
+            cur_path_id = state['cur_path_id']
+            session['_runtime_state'] = None
+            logs.info('cmd_chk_path 已恢复正式任务状态，未消耗get_box/get_path队列')
         # 断点续传：快进到游标 + 操作员确认
         if resume_cursor is not None:
             rp_idx, rp, last_grab_action, cur_box_id, cur_path_id = _fast_forward(rp_list, be, resume_cursor)
@@ -1018,7 +1591,6 @@ def main():
                     logs.warning("机器人已断开连接 ！")
                     break
                 if mes_hex == cmd_chk_path:
-                    chk_value = len(rp.robot_offsets) - 1
                     _chk_stamp = time.strftime('%Y%m%d_%H%M%S')
                     _chk_output_dir = _create_chk_path_output_dir(
                         _chk_stamp)
@@ -1031,14 +1603,78 @@ def main():
                         'face_images': [],
                         'system_issues': [],
                         'mixture_fields': _collect_mixture_fields(config_rp),
+                        'order_archive_path': parsed_order_path,
                     }
                     _attach_chk_path_log(chk_session, logs)
-                    logs.info(
-                        f"cmd_chk_path 批量检查开始，当前 Block {rp_idx + 1}，"
-                        f"本 Block 待检查 {chk_value} 抓，"
-                        f"会话目录={_chk_output_dir}")
+                    try:
+                        # cmd_chk_path 是手动前置检查：重新构造独立垛序和环境，
+                        # 检查结束后恢复正式队列，不消费 get_box/get_path 状态。
+                        _runtime_state = {
+                            'rp_list': rp_list,
+                            'rp_idx': rp_idx,
+                            'rp': rp,
+                            'be': be,
+                            'last_grab_action': last_grab_action,
+                            'last_grab_box_type': last_grab_box_type,
+                            'last_grab_car_width': last_grab_car_width,
+                            'last_grab_block_type': last_grab_block_type,
+                            'last_grab_detection_gap': last_grab_detection_gap,
+                            'cur_box_id': cur_box_id,
+                            'cur_path_id': cur_path_id,
+                        }
+                        _chk_rp_list = [
+                            RobotPosition(copy.deepcopy(block_cfg))
+                            for block_cfg in (
+                                config_rp if isinstance(config_rp, list)
+                                else [config_rp])
+                        ]
+                        _chk_rp_list[-1].boxes[-1]['action'] = 3
+                        _chk_last_offset = next(
+                            item for item in reversed(
+                                _chk_rp_list[-1].robot_offsets)
+                            if item != 'done')
+                        _chk_last_offset['action'] = 3
+                        chk_session['order_validation'] = \
+                            _validate_order_alignment(
+                                _chk_rp_list, config_rp=config_rp)
+                        chk_session['plc_validation'] = _validate_plc_indices(
+                            _chk_rp_list, _get_special_ind(config_rp))
+                        chk_session['_runtime_state'] = _runtime_state
+
+                        rp_list = _chk_rp_list
+                        rp_idx = 0
+                        rp = rp_list[0]
+                        be = BinEnv(config_be)
+                        be.reset()
+                        last_grab_action = None
+                        last_grab_box_type = None
+                        last_grab_car_width = None
+                        last_grab_block_type = None
+                        last_grab_detection_gap = None
+                        cur_box_id = cur_path_id = 0
+                        chk_value = len(rp.robot_offsets) - 1
+                        logs.info(
+                            f"cmd_chk_path 独立前置检查开始，共 {len(rp_list)} 个Block，"
+                            f"首Block待检查 {chk_value} 抓，"
+                            f"会话目录={_chk_output_dir}")
+                    except Exception as _chk_init_error:
+                        chk_value = 0
+                        chk_session['path_forced_failed'] = True
+                        chk_session['order_validation'] = {
+                            'passed': False,
+                            'issues': [f'独立垛序构造失败: {_chk_init_error}'],
+                        }
+                        chk_session['plc_validation'] = {
+                            'passed': False,
+                            'issues': ['独立垛序构造失败，PLC字段未校验'],
+                        }
+                        chk_session['system_issues'].append(
+                            f'cmd_chk_path初始化失败: {_chk_init_error}')
+                        logs.error(
+                            f'cmd_chk_path 独立检查初始化失败: '
+                            f'{type(_chk_init_error).__name__}: {_chk_init_error}')
                     if chk_value <= 0:
-                        _chk_status = 2
+                        _chk_status = 222
                         try:
                             _empty_summary = _write_chk_path_summary(chk_session)
                             logs.info("cmd_chk_path 当前无待检查路径")
@@ -1048,6 +1684,7 @@ def main():
                             logs.warning(
                                 f"cmd_chk_path 空任务汇总保存失败: {_empty_summary_error}")
                         finally:
+                            _restore_chk_runtime(chk_session)
                             try:
                                 server.send_message(_build_msg(
                                     1,
@@ -1130,7 +1767,8 @@ def main():
                 box_size_cfg = box.get('size', [rp.l, rp.w, rp.h])
                 # 断点续传：先存游标后发送（断电宁可漏一抓也不重码）
                 cur_box_id = box['id']
-                if store and not off_line_mode and resume_save:
+                if (chk_session is None and store
+                        and not off_line_mode and resume_save):
                     store.save_cursor(rp_idx, cur_box_id, cur_path_id)
                 payload = (
                     _data_block(float(box_cfg), float(int(box_type_cfg)), float(area_cfg))
@@ -1162,7 +1800,8 @@ def main():
                 last_grab_detection_gap = None
                 # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
                 cur_path_id = action['id']
-                if store and not off_line_mode and resume_save:
+                if (chk_session is None and store
+                        and not off_line_mode and resume_save):
                     store.save_cursor(rp_idx, cur_box_id, cur_path_id)
                 if action['id'] == 1:
                     logs.info("*** Block.{} NO.{} 码垛面 开始！***".format(rp_idx + 1, 1))
@@ -1784,7 +2423,8 @@ def main():
                         rp = rp_list[rp_idx]
                         # 断点续传：切到新 block，游标重置并落盘（新 block 尚未消费）
                         cur_box_id = cur_path_id = 0
-                        if store and not off_line_mode and resume_save:
+                        if (chk_session is None and store
+                                and not off_line_mode and resume_save):
                             store.save_cursor(rp_idx, cur_box_id, cur_path_id)
                         # chk_value > 0 说明当前处于批量检查模式，继续检查新 block
                         if chk_value > 0:
@@ -1797,13 +2437,14 @@ def main():
                     logs.info("*** Block.{} NO.{} 码垛面 结束！***".format(rp_idx + 1, action['num_F']))
                     logs.info("所有 block 路径规划结束 !")
                     # 断点续传：全部完成，清除续传文件，避免下次误触发
-                    if store and not off_line_mode and resume_save:
+                    if (chk_session is None and store
+                            and not off_line_mode and resume_save):
                         store.clear()
                         logs.info("码垛全部完成，已清除断点续传记录")
                 if chk_value != 0:
                     chk_value -= 1
                     if chk_value == 0 and chk_session is not None:
-                        _chk_status = 2
+                        _chk_status = 222
                         try:
                             _chk_summary = _write_chk_path_summary(chk_session)
                             _log_chk_path_summary(_chk_summary, logs)
@@ -1813,6 +2454,7 @@ def main():
                                 f"cmd_chk_path 汇总保存失败，仅保留运行日志: "
                                 f"{_chk_summary_error}")
                         finally:
+                            _restore_chk_runtime(chk_session)
                             try:
                                 server.send_message(_build_msg(
                                     1,

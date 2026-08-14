@@ -29,7 +29,7 @@ MENU = """
 │  2. get_per_count 请求本面箱数             │
 │  3. get_box       请求来料配方             │
 │  4. get_path      请求放置路径             │
-│  5. chk_path      触发路径预取             │
+│  5. chk_path      手动前置检查             │
 │  9. 断开连接                              │
 │  q. 退出                                 │
 └──────────────────────────────────────────┘
@@ -108,8 +108,18 @@ def handle_get_path(sock):
 
 
 def handle_chk_path(sock):
+    """等待并打印路径/垛序/PLC三位检查状态。"""
     sock.sendall(CMD_CHK_PATH)
-    print("  chk_path 已发送（服务端无响应体，后续路径由服务端批量推送）")
+    _, blocks = recv_response(sock)
+    status = int(parse_floats(blocks[0], 1)[0])
+    digits = str(status)
+    if len(digits) == 3 and all(value in '12' for value in digits):
+        labels = ['通过' if value == '1' else '失败' for value in digits]
+        print(
+            f"  chk_path={status}（路径={labels[0]}，垛序={labels[1]}，"
+            f"PLC={labels[2]}）")
+    else:
+        print(f"  chk_path 返回未知状态={status}")
 
 
 HANDLERS = {

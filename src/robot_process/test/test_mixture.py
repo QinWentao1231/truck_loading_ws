@@ -128,13 +128,13 @@ class MixturePlacementTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'P1 单抓能力'):
             RobotPosition(cfg)
 
-    def test_all_mixture_area_cfg_are_fixed_to_one(self):
+    def test_mixture_wall_side_finishing_grab_uses_area_cfg_four(self):
         cfg = make_mixture_config()
-        # 遗留断言：这里仍验证早期“混装全部为1”的规则；当前实现会把符合
-        # 墙边收尾条件的第二抓标为4，后续应单独迁移此测试的名称和期望值。
+        # 两抓位于同一高度：第二抓靠近右侧边界，且左侧已有高于当前底面
+        # 50 mm 的箱体，因此它是当前高度的墙边收尾抓。
         cfg['mixture'][0]['Items'][1]['Pos']['Z'] = 0
         rp = RobotPosition(cfg)
-        self.assertEqual([box['area_cfg'] for box in rp.boxes], [1, 1])
+        self.assertEqual([box['area_cfg'] for box in rp.boxes], [1, 4])
 
     def test_empty_items_are_rejected(self):
         cfg = make_mixture_config()
