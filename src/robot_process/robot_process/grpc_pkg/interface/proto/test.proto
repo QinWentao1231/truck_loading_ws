@@ -39,6 +39,7 @@ message Mixture{
     string Type = 1; // 箱型代号
     int32 Num = 2; // 箱型数量
     Position Pos = 3; // 左下前角点位置坐标
+    bool Ishead = 4; // 是否需要车头变形
 }
 
 message Position{
@@ -58,6 +59,7 @@ message Trapezoid{
     repeated Group Group = 7; // 堆叠按爪分组
     bool Isdoor = 8; // 是否需要尾门变形
     string Type = 9; // 箱型代号
+    bool Ishead = 10; // 是否需要车头变形
 }
 
 // 堆叠缝隙排布
@@ -100,11 +102,11 @@ message SpecialInd{
     repeated int32 BoxRightInd = 9; // P1右翻序号
 }
 
-// 订单条件总包
+// 运单条件总包
 message Condition{
     CarCondition car = 1; // 车辆条件
-    repeated OrderCondition orders = 2; // 子订单条件
-    Limitation limit = 3; // 订单限制
+    repeated OrderCondition orders = 2; // 出库单条件
+    Limitation limit = 3; // 运单限制
 }
 
 // 车辆条件
@@ -113,6 +115,7 @@ message CarCondition{
     Size original = 2; // 车辆原始尺寸
     Size reserve = 3; // 安全运行冗余尺寸
     Size frame = 4; // 尾门门框尺寸
+    Size head = 5; // 车头前端尺寸
 }
 
 // 尺寸参数
@@ -124,8 +127,8 @@ message Size{
 
 // 子订单条件
 message OrderCondition{
-    string orderId = 1; // 子订单号
-    repeated BoxCondition boxes = 2; // 箱型信息
+    string orderId = 1; // 出库单地址
+    repeated BoxCondition boxes = 2; // 合同箱型信息
 }
 
 // 箱型信息
@@ -135,6 +138,8 @@ message BoxCondition{
     Size reserve = 3; // 箱型冗余尺寸
     Grip grip = 4; // 抓取参数
     int32 Nt = 5; // 总个数
+    string contractId = 6; //合同号
+    string materialId = 7; //物料代号
 }
 
 // 抓取参数(单抓个数和单次抓取时间)
