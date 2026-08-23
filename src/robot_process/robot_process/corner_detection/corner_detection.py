@@ -49,6 +49,7 @@ SPECIAL_FRONT_MIN_PLANE_POINTS = 300
 SPECIAL_FRONT_MIN_HEIGHT_M = 0.60
 SPECIAL_FRONT_MIN_WIDTH_M = 0.08
 SPECIAL_FRONT_MIN_INLIER_RATIO = 0.45
+SPECIAL_FRONT_FALLBACK_SIDE_PERCENTILE = 3.0
 SIDE_ANGLE_MIN_X_M = 0.0
 SIDE_ANGLE_FRONT_MARGIN_M = 0.03
 SIDE_ANGLE_Y_HALF_BAND_M = 0.08
@@ -588,7 +589,8 @@ def _process_point_cloud_impl(pcd, method):
     """执行角点检测主流程；输入点云会原位旋转到算法内部坐标系。
 
     method 含义：1=车头波纹板，2=I形垛面，3=L形垛面四角点，
-    4=I形垛面并输出相对车厢内基准的 Ry，5=异形车头双斜面，
+    4=I形垛面并输出相对车厢内基准的 Ry，5=异形车头双斜面（双斜面
+    识别失败时回退method=2，并使用更靠内的侧壁分位），
     6=前一面为混装面并选择最靠雷达的有效前表面。除 method=4 外 Ry 为0。
     """
     ori_points = np.asarray(pcd.points)
@@ -792,6 +794,7 @@ def _process_point_cloud_impl(pcd, method):
     if view or view_normal:
         _prepare_visualization_backend()
     corner_list = []
+    special_front_fallback = False
     # method 的完整定义见本函数文档字符串。
     print(f'method: {method}')
     _FRONT_RIB_MIN = 0.05            # 车头加强筋兜底补偿(m)：筋检测不足时至少前移此距离
@@ -933,11 +936,23 @@ def _process_point_cloud_impl(pcd, method):
         else:
             i_model = [a, b, c, d]
         if method == 5:
-            (special_left_model,
-             special_right_model,
-             special_left_cloud,
-             special_right_cloud) = detect_special_front_planes(
-                points, normals, i_model, inlier_cloud.points)
+            try:
+                (special_left_model,
+                 special_right_model,
+                 special_left_cloud,
+                 special_right_cloud) = detect_special_front_planes(
+                    points, normals, i_model, inlier_cloud.points)
+            except (CornerDetectionCandidateError, ValueError,
+                    np.linalg.LinAlgError) as exc:
+                # method=5来自异形车头先验，但现场结构可能接近正常车头，
+                # 或斜面过小而无法稳定拟合。此时沿用已经拟合好的中间正面，
+                # 后续按method=2使用左右侧壁与地面求角点。
+                special_front_fallback = True
+                method = 2
+                print(
+                    '异形车头双斜面识别失败，回退method=2常规车头识别: '
+                    f'{type(exc).__name__}: {exc}'
+                )
         if view:
             front_plane2 = show_plane(i_model, [0, 1, 0])
             if method == 5:
@@ -1031,6 +1046,17 @@ def _process_point_cloud_impl(pcd, method):
     else:
         raise Exception(
             f'Wrong method value: {method}; expected 1, 2, 3, 4, 5, or 6')
+
+    # 异形识别失败后的常规侧壁采用更靠近车厢内部的3%点云均值。
+    # 常规method=2仍保持原来的10%，避免改变已经验证稳定的正常流程。
+    side_percentile = (
+        SPECIAL_FRONT_FALLBACK_SIDE_PERCENTILE
+        if special_front_fallback else _SIDE_PCT
+    )
+    if special_front_fallback:
+        print(
+            f'异形回退侧壁安全内缩: 使用内侧{side_percentile:g}%点云均值'
+        )
 
     # 左侧面点云滤波
     flip_mask = (normals[:, 1] * points[:, 1]) < 0
@@ -1134,7 +1160,7 @@ def _process_point_cloud_impl(pcd, method):
         positive_mask = all_distances > 0
         positive_distances = all_distances[positive_mask]
         require_candidate_values(positive_distances, "左侧壁正向距离")
-        thr_l = np.percentile(positive_distances, _SIDE_PCT)
+        thr_l = np.percentile(positive_distances, side_percentile)
         left_percentile_mask = positive_mask & (all_distances <= thr_l)
         delta = float(all_distances[left_percentile_mask].mean())
         side_left_model = [0, 1, 0, -delta]
@@ -1149,7 +1175,8 @@ def _process_point_cloud_impl(pcd, method):
         vis = o3d.visualization.Visualizer()
         vis.create_window(
             window_name=(
-                f"Left wall 10pct: red={left_percentile_mask.sum()}, "
+                f"Left wall {side_percentile:g}pct: "
+                f"red={left_percentile_mask.sum()}, "
                 f"green={len(left_wall_points) - left_percentile_mask.sum()}"),
             width=800, height=600, left=500, top=200)
         vis.add_geometry(left_colored_pcd)
@@ -1249,7 +1276,7 @@ def _process_point_cloud_impl(pcd, method):
         n_main = np.array([0, -1, 0])
         distances = right_wall_points @ n_main
         require_candidate_values(distances, "右侧壁距离")
-        thr_r = np.percentile(distances, _SIDE_PCT)
+        thr_r = np.percentile(distances, side_percentile)
         right_percentile_mask = distances <= thr_r
         delta = float(distances[right_percentile_mask].mean())
         side_right_model = [0, -1, 0, -delta]
@@ -1266,7 +1293,8 @@ def _process_point_cloud_impl(pcd, method):
         vis = o3d.visualization.Visualizer()
         vis.create_window(
             window_name=(
-                f"Right wall 10pct: red={right_percentile_mask.sum()}, "
+                f"Right wall {side_percentile:g}pct: "
+                f"red={right_percentile_mask.sum()}, "
                 f"green={len(right_wall_points) - right_percentile_mask.sum()}"),
             width=800, height=600, left=500, top=200)
         vis.add_geometry(right_colored_pcd)
@@ -1629,7 +1657,9 @@ def process_point_cloud(pcd, method):
 
 
 if __name__ == '__main__':
-    file_path = ("/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
-                 "pcd_logs/0729/XT0729.pcd")
+    file_path = (
+        "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
+        "pcd_logs/0714/trun_cloud_20260714_141258.pcd"
+    )
     pcd = o3d.io.read_point_cloud(file_path)
-    process_point_cloud(pcd, 1)
+    process_point_cloud(pcd, 2)

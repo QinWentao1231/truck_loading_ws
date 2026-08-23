@@ -107,6 +107,8 @@ class MixturePlacementTest(unittest.TestCase):
         actions = [a for a in rp.ori_offsets if a != 'done']
 
         self.assertEqual(rp.block_type, 'mixture')
+        self.assertFalse(rp.is_head)
+        self.assertEqual(rp.head, {'L': 0.0, 'W': 0.0, 'H': 0.0})
         self.assertEqual(rp.box_count, 8)
         self.assertEqual(len(actions), 2)
         self.assertEqual([a['box_type'] for a in actions], ['104', '201'])
@@ -121,6 +123,16 @@ class MixturePlacementTest(unittest.TestCase):
             [b['size'] for b in rp.boxes],
             [[460, 250, 580], [525, 275, 300]],
         )
+
+    def test_ishead_marks_the_whole_mixture_block(self):
+        cfg = make_mixture_config()
+        cfg['car']['head'] = {'L': 1200, 'W': 2460, 'H': 900}
+        cfg['mixture'][0]['Items'][1]['Ishead'] = True
+
+        rp = RobotPosition(cfg)
+
+        self.assertTrue(rp.is_head)
+        self.assertEqual(rp.head, {'L': 1200.0, 'W': 2460.0, 'H': 900.0})
 
     def test_position_item_rejects_num_above_grip_capacity(self):
         cfg = make_mixture_config()

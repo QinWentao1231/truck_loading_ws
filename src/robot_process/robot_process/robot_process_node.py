@@ -17,7 +17,9 @@ import pickle
 import copy
 import logging
 import numpy as np
-from rrt_env.environment_3D import BinEnv, RobotPosition
+from rrt_env.environment_3D import (
+    BinEnv, build_robot_positions,
+)
 from rrt_env.fanuc_kinematics import FanucKinematics, make_uf_transform
 from auxiliary_methods.search_space import SearchSpace
 from socket_pkg.socket_server import SocketApp
@@ -152,6 +154,79 @@ def _find_mixture_block_position(rp_list) -> int:
     return positions[0] if positions else 0
 
 
+def _find_head_block_positions(rp_list) -> list[int]:
+    """返回所有异形车头 block 在 rp_list 中从 1 开始的位置。"""
+    return [
+        index for index, item in enumerate(rp_list, start=1)
+        if item.is_head
+    ]
+
+
+def _action_car_width(action, rp) -> float:
+    """返回当前抓所属面的车宽；非异形订单等于 ``rp.W``。"""
+    return float(action.get('car_width', rp.W))
+
+
+def _action_p1_right_wall(action, rp) -> float:
+    """返回当前面P1区域右边界，规则垛会扣除同面的P2区域。"""
+    return float(action.get(
+        'p1_right_wall',
+        _action_car_width(action, rp) - rp.N2 * rp.l,
+    ))
+
+
+def _action_right_edge_y(action) -> float:
+    """返回整抓箱体在车宽方向上的实际右边界。"""
+    y_start = float(action['pos'][1])
+    actual_num = sum(int(value) for value in action['num'])
+    if action['area'] == 'p1':
+        return (
+            y_start
+            + actual_num * float(action['size'][1])
+            + sum(float(value) for value in action.get('gaps', []))
+        )
+    if action['area'] == 'p3':
+        # P3侧立后，车宽方向占用的是箱子原始高度。
+        return y_start + actual_num * float(action['size'][2])
+    # P2的多箱沿车深方向排列，车宽方向只占一个箱宽。
+    return y_start + float(action['size'][1])
+
+
+def _is_row_rightmost_grab(action, rp) -> bool:
+    """判断当前抓是否为所在行最右抓。
+
+    同一 block 内以“同面、同区域、同底面高度”定义一行；按整抓箱体
+    的实际 Y 右边界比较，兼容不同箱宽、P3侧立和P1多段放置。
+    """
+    row_actions = [
+        item for item in rp.ori_offsets
+        if item != 'done'
+        and int(item['num_F']) == int(action['num_F'])
+        and item['area'] == action['area']
+        and np.isclose(
+            float(item['pos'][2]), float(action['pos'][2]),
+            rtol=0.0, atol=1e-3,
+        )
+    ]
+    if not row_actions:
+        return False
+    rightmost_y = max(_action_right_edge_y(item) for item in row_actions)
+    return bool(np.isclose(
+        _action_right_edge_y(action), rightmost_y,
+        rtol=0.0, atol=1e-3,
+    ))
+
+
+def _corner_compensation_applies(action, rp, config_be, direction) -> bool:
+    """角点宽度补偿仅用于右半侧、方向2且为所在行最右侧的抓次。"""
+    return (
+        bool(config_be['use_corner'])
+        and direction == 2
+        and _is_row_rightmost_grab(action, rp)
+        and float(action['pos'][1]) >= _action_car_width(action, rp) * 0.5
+    )
+
+
 def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
                           y_offset_app, direction=None):
     """按现有规则生成 P1/P3 的 x0、x1、APP 和碰撞包围盒。"""
@@ -174,9 +249,10 @@ def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
     elif action['area'] == 'p1':
         action_grab_p1 = action.get('grab_num_p1', rp.grab_num_p1)
         action_box_w = action['size'][1]
+        car_width = _action_car_width(action, rp)
         x0 = [
             config_be['p1_init_pos'][0],
-            max(rp.W - (action_grab_p1 + 1) * action_box_w, x_app[1]),
+            max(car_width - (action_grab_p1 + 1) * action_box_w, x_app[1]),
             max(config_be['p3_init_pos'][2] - box_z, x_app[2]),
         ]
     else:
@@ -225,8 +301,10 @@ def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
 
 def _candidate_goal(action, rp, config_be, dis_y, direction):
     """计算候选轨迹使用的目标点，不产生重复日志。"""
-    if config_be['use_corner'] and direction == 2:
-        correction = float(np.clip(dis_y - rp.W, 0, 40))
+    if _corner_compensation_applies(
+            action, rp, config_be, direction):
+        correction = float(np.clip(
+            dis_y - _action_car_width(action, rp), 0, 40))
         return (action['pos'][0], action['pos'][1] + correction, action['pos'][2])
     return tuple(action['pos'])
 
@@ -269,13 +347,15 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
         action for action in rp.ori_offsets
         if action != 'done' and action['num_F'] == face_number
     ]
+    face_width = (
+        _action_car_width(actions[0], rp) if actions else float(rp.W))
     paths = []
     common_title = (
         f'Block {block_number} Face {face_number} - {rp.block_type}')
     if save_face:
         paths.append(save_face_layout(
             actions,
-            {'L': rp.L, 'W': rp.W, 'H': rp.H},
+            {'L': rp.L, 'W': face_width, 'H': rp.H},
             f'face_block{block_number:02d}_face{face_number:02d}_{stamp}',
             title=common_title,
             issue_ids=issue_ids,
@@ -284,7 +364,7 @@ def _save_face_visualizations(rp, block_number, face_number, stamp,
     if save_mixture and rp.block_type == 'mixture':
         paths.append(save_face_layout(
             actions,
-            {'L': rp.L, 'W': rp.W, 'H': rp.H},
+            {'L': rp.L, 'W': face_width, 'H': rp.H},
             f'mixture_pallet_block{block_number:02d}_face{face_number:02d}_{stamp}',
             title=f'Mixture pallet - Block {block_number} Face {face_number}',
             issue_ids=issue_ids,
@@ -313,11 +393,21 @@ def _save_parsed_order(config_rp, rp_list, source='online', raw_order=None):
         block_summaries.append({
             'block': block_index,
             'block_type': rp_item.block_type,
+            'is_head': bool(rp_item.is_head),
             'box_types': list(rp_item.box_configs.keys()),
             'box_count': int(rp_item.box_count),
             'grab_count': len(actions),
             'face_count': max(
                 (int(item['num_F']) for item in actions), default=0),
+            'head_faces': [
+                {
+                    'face': int(face_number),
+                    **copy.deepcopy(values),
+                }
+                for face_number, values in sorted(
+                    rp_item.head_face_geometry.items())
+                if values.get('is_head')
+            ],
         })
     record = {
         'schema_version': 1,
@@ -336,6 +426,7 @@ def _save_parsed_order(config_rp, rp_list, source='online', raw_order=None):
         'total_grab_count': sum(item['grab_count'] for item in block_summaries),
         'mixture_block_position': _find_mixture_block_position(rp_list),
         'mixture_block_positions': _find_mixture_block_positions(rp_list),
+        'head_block_positions': _find_head_block_positions(rp_list),
         'block_summaries': block_summaries,
         'order_fields': normalized_blocks,
     }
@@ -379,6 +470,7 @@ def _collect_mixture_fields(config_rp):
                 mixture_items.append({
                     'Type': _json_value(item, 'Type', ''),
                     'Num': _json_value(item, 'Num', 0),
+                    'Ishead': bool(_json_value(item, 'Ishead', False)),
                     'Pos': {
                         'X': _json_value(pos, 'X', 0.0),
                         'Y': _json_value(pos, 'Y', 0.0),
@@ -697,31 +789,39 @@ def _validate_plc_indices(rp_list, special_ind):
     """按垛序箱序号校验 PLC 的 BoxP3Ind 与 BoxRightInd。
 
     ``BoxP3Ind`` 实际表示“不翻转”：1XX 的 P3，以及 2XX/3XX 的
-    P1/P3。``BoxRightInd`` 只需记录仍可能翻转的 1XX P1 行内最右抓；
-    混装 block 明确排除，不参与最右抓判断。
+    P1/P3。``BoxRightInd`` 只需记录仍可能右翻的 1XX P1 行内最右抓；
+    混装 block 与尾料/尾门简单行不参与最右抓判断。尾料/尾门 P1
+    只是“不右翻”，不会因此归入 ``BoxP3Ind``；其动作本身若为常规箱
+    P3，仍按 1XX-P3 规则加入 ``BoxP3Ind``。
     """
     action_records = []
     next_box_id = 1
     for block_index, rp_item in enumerate(rp_list, start=1):
         actions = [item for item in rp_item.ori_offsets if item != 'done']
+        boxes_by_id = {
+            int(box['id']): box for box in rp_item.boxes if 'id' in box
+        }
         for action in actions:
             actual_num = int(sum(action['num']))
             box_ids = list(range(next_box_id, next_box_id + actual_num))
             next_box_id += actual_num
+            box = boxes_by_id.get(int(action['id']), {})
             action_records.append({
                 'block': block_index,
                 'block_type': rp_item.block_type,
                 'action': action,
                 'box_ids': box_ids,
+                'is_tail': bool(box.get('is_tail', False)),
             })
 
     # 规则/梯形垛中，同面、同高度、同箱型的 P1 行至少有两抓时，Y 最大
-    # 的那一抓是最右抓。混装面不做该推断。
+    # 的那一抓是最右抓。混装面以及统一靠左、无需右翻的尾料/尾门简单行
+    # 不做该推断；这里仅影响 BoxRightInd，不会排除尾门区域的 1XX-P3。
     row_groups = {}
     for record in action_records:
         action = record['action']
         box_prefix = str(action.get('box_type', ''))[:1]
-        if (record['block_type'] == 'mixture'
+        if (record['block_type'] == 'mixture' or record['is_tail']
                 or box_prefix != '1' or action['area'] != 'p1'):
             continue
         key = (
@@ -1036,6 +1136,7 @@ def _parse_regular(src_list):
             'F13': item.F13, 'F2': item.F2,
             'E': item.E, 'Nx': item.Nx,
             'Type': item.Type,
+            'Ishead': bool(getattr(item, 'Ishead', False)),
             **_parse_stack_group(item),
         })
     return result
@@ -1052,6 +1153,7 @@ def _parse_trapezoid(src_list):
             'T1': item.T1, 'T3': item.T3,
             'Nx': item.Nx,
             'Isdoor': item.Isdoor,
+            'Ishead': bool(getattr(item, 'Ishead', False)),
             'Type': item.Type,
             **_parse_stack_group(item),
         })
@@ -1075,11 +1177,14 @@ def _parse_mixture(src_list):
     for entry in src_list:
         nested_items = getattr(entry, 'Items', None)
         items = nested_items if nested_items is not None else (entry,)
+        entry_is_head = bool(getattr(entry, 'Ishead', False))
         parsed_items = []
         for item in items:
             parsed_items.append({
                 'Type': item.Type,
                 'Num': item.Num,
+                'Ishead': bool(
+                    getattr(item, 'Ishead', entry_is_head)),
                 'Pos': {'X': item.Pos.X, 'Y': item.Pos.Y, 'Z': item.Pos.Z},
             })
         if nested_items is None:
@@ -1104,8 +1209,18 @@ def _json_mixture_items(face):
 
 
 def _json_value(data, upper_name, default=None):
-    """读取 Type/type、Num/num、Pos/pos、X/x 等大小写形式。"""
-    return data.get(upper_name, data.get(upper_name.lower(), default))
+    """读取 proto 原名、小驼峰和全小写形式的 JSON 字段。"""
+    candidates = (
+        upper_name,
+        upper_name[:1].lower() + upper_name[1:],
+        upper_name.lower(),
+    )
+    if upper_name.lower() == 'ishead':
+        candidates += ('isHead',)
+    for candidate in candidates:
+        if candidate in data:
+            return data[candidate]
+    return default
 
 
 def _parse_mixture_json(src_list):
@@ -1119,12 +1234,15 @@ def _parse_mixture_json(src_list):
                 nested_items = entry[key]
                 break
         items = nested_items if nested_items is not None else (entry,)
+        entry_is_head = bool(_json_value(entry, 'Ishead', False))
         parsed_items = []
         for item in items:
             pos = _json_value(item, 'Pos', {}) or {}
             parsed_items.append({
                 'Type': _json_value(item, 'Type', ''),
                 'Num': _json_value(item, 'Num', 0),
+                'Ishead': bool(
+                    _json_value(item, 'Ishead', entry_is_head)),
                 'Pos': {
                     'X': _json_value(pos, 'X', 0.0),
                     'Y': _json_value(pos, 'Y', 0.0),
@@ -1154,9 +1272,15 @@ def parse_planner_json(data: dict):
         cond     = data['condition']
         car_orig = cond['car']['original']
         car_rsv  = cond['car']['reserve']
+        car_head = cond['car'].get('head', {}) or {}
         car_info = {
             'size':    {'L': car_orig['L'], 'W': car_orig['W'], 'H': car_orig['H']},
             'reserve': {'L': car_rsv['L'],  'W': car_rsv['W'],  'H': car_rsv['H']},
+            'head': {
+                'L': _json_value(car_head, 'L', 0.0),
+                'W': _json_value(car_head, 'W', 0.0),
+                'H': _json_value(car_head, 'H', 0.0),
+            },
         }
 
 
@@ -1213,6 +1337,7 @@ def parse_planner_json(data: dict):
                     'F13': item['F13'], 'F2': item['F2'],
                     'E': item['E'], 'Nx': item['Nx'],
                     'Type': item.get('Type', ''),
+                    'Ishead': bool(_json_value(item, 'Ishead', False)),
                     'Stack': [list(x['Width']) for x in item['Stack']],
                     'Group': [list(x['Unit'])  for x in item['Group']],
                 })
@@ -1228,6 +1353,7 @@ def parse_planner_json(data: dict):
                     'T3': item.get('T3', 0),
                     'Nx': item.get('Nx', 0),
                     'Isdoor': item.get('Isdoor', False),
+                    'Ishead': bool(_json_value(item, 'Ishead', False)),
                     'Type': item.get('Type', ''),
                     'Stack': [list(x['Width']) for x in item.get('Stack', [])],
                     'Group': [list(x['Unit'])  for x in item.get('Group', [])],
@@ -1273,9 +1399,15 @@ def callback(data):
     try:
         car_orig = data.condition.car.original
         car_rsv  = data.condition.car.reserve
+        car_head = getattr(data.condition.car, 'head', None)
         car_info = {
             'size':    {'L': car_orig.L, 'W': car_orig.W, 'H': car_orig.H},
             'reserve': {'L': car_rsv.L,  'W': car_rsv.W,  'H': car_rsv.H},
+            'head': {
+                'L': getattr(car_head, 'L', 0.0),
+                'W': getattr(car_head, 'W', 0.0),
+                'H': getattr(car_head, 'H', 0.0),
+            },
         }
 
         # 按箱型 type 建立索引（忽略 orderId）
@@ -1361,7 +1493,8 @@ def _fast_forward(rp_list, be, cursor):
         if rp.block_type == 'mixture' and act['area'] == 'p1':
             try:
                 clearance = be.mixture_side_clearance(
-                    act, left_wall=0, right_wall=rp.W)
+                    act, left_wall=0,
+                    right_wall=_action_car_width(act, rp))
                 if clearance['blocking']:
                     raise ValueError(
                         f"目标区域与 {len(clearance['blocking'])} 个已码箱体重叠")
@@ -1478,16 +1611,28 @@ def main():
         logs.info("码垛环境初始化成功！")
         # 计算垛序（逐 block 生成，保留各自 rp 对象）
         try:
-            rp_list = [RobotPosition(block_cfg)
-                       for block_cfg in (config_rp if isinstance(config_rp, list) else [config_rp])]
+            rp_list = build_robot_positions(config_rp)
             mixture_block_positions = _find_mixture_block_positions(rp_list)
+            head_block_positions = _find_head_block_positions(rp_list)
             # 最后一个 block 的末条目 action 升为 3（全部结束），其余 block 末条目保持 2（block 结束）
             rp_list[-1].boxes[-1]['action'] = 3
             last_offset = next(x for x in reversed(rp_list[-1].robot_offsets) if x != 'done')
             last_offset['action'] = 3
             logs.info(
                 f"计算垛序成功！共 {len(rp_list)} 个 block，"
-                f"混装 block 位置={mixture_block_positions or '无'}")
+                f"混装 block 位置={mixture_block_positions or '无'}，"
+                f"异形车头 block 位置={head_block_positions or '无'}")
+            for block_index, rp_item in enumerate(rp_list, start=1):
+                for face_number, geometry in sorted(
+                        rp_item.head_face_geometry.items()):
+                    if not geometry.get('is_head'):
+                        continue
+                    logs.info(
+                        f"[HEAD] Block {block_index} 面{face_number}: "
+                        f"累计纵深={geometry['depth_x']:.1f}mm，"
+                        f"当前面占用纵深={geometry['face_depth']:.1f}mm，"
+                        f"当前可用车宽={geometry['car_width']:.1f}mm，"
+                        f"识别来源={geometry['source']}")
         except Exception as e:
             logs.error(f"垛序计算失败，请检查垛型数据: {e}")
             sys.exit(1)
@@ -1619,7 +1764,8 @@ def main():
             rp_idx, rp, last_grab_action, cur_box_id, cur_path_id = _fast_forward(rp_list, be, resume_cursor)
             if last_grab_action is not None:
                 last_grab_box_type = last_grab_action.get('box_type', rp.box_type)
-                last_grab_car_width = rp.W
+                last_grab_car_width = _action_car_width(
+                    last_grab_action, rp)
                 last_grab_block_type = rp.block_type
             logs.warning("===== 断点续传待确认 =====")
             logs.warning(f"将从 block {rp_idx + 1}/{len(rp_list)} 继续，"
@@ -1684,12 +1830,7 @@ def main():
                             _attach_chk_path_log(chk_session, logs)
                             chk_session['mixture_fields'] = \
                                 _collect_mixture_fields(config_rp)
-                            _chk_rp_list = [
-                                RobotPosition(copy.deepcopy(block_cfg))
-                                for block_cfg in (
-                                    config_rp if isinstance(config_rp, list)
-                                    else [config_rp])
-                            ]
+                            _chk_rp_list = build_robot_positions(config_rp)
                             _chk_rp_list[-1].boxes[-1]['action'] = 3
                             _chk_last_offset = next(
                                 item for item in reversed(
@@ -1746,9 +1887,11 @@ def main():
                 else:
                     mes_hex = cmd_get_path
                 if mes_hex == cmd_get_pallet:
-                    # 发送总体信息（固定3块）：
-                    #   第1块：垛型参数；第2块：箱型参数；
+                    # 发送总体信息（固定4块）：
+                    #   第1块：总箱数、面数、车宽、head.W、head.L；
+                    #   第2块：箱型参数；
                     #   第3块：前6个混装 block 序号，按大端float32编码，不足补0.0。
+                    #   第4块：前6个异形车头 block 序号，规则同第3块。
                     mixture_positions_to_send = mixture_block_positions[:6]
                     mixture_position_slots = [
                         float(position) for position in mixture_positions_to_send
@@ -1760,27 +1903,47 @@ def main():
                             f'混装 block 共 {len(mixture_block_positions)} 个，'
                             f'cmd_get_pallet 仅发送前6个：'
                             f'{mixture_positions_to_send}')
+                    head_positions_to_send = head_block_positions[:6]
+                    head_position_slots = [
+                        float(position) for position in head_positions_to_send
+                    ]
+                    head_position_slots.extend(
+                        [0.0] * (6 - len(head_position_slots)))
+                    if len(head_block_positions) > 6:
+                        logs.warning(
+                            f'异形车头 block 共 {len(head_block_positions)} 个，'
+                            f'cmd_get_pallet 仅发送前6个：'
+                            f'{head_positions_to_send}')
                     payload = (
-                        _data_block(rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W)
+                        _data_block(
+                            rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W,
+                            rp.head['W'], rp.head['L'])
                         + _data_block(rp.l, rp.w, rp.h)
                         + _data_block(*mixture_position_slots)
+                        + _data_block(*head_position_slots)
                         + b'\x00\x00'
                     )
-                    server.send_message(_build_msg(3, payload))
+                    server.send_message(_build_msg(4, payload))
                     floor_n = rp.ori_offsets[-2]['num_F']
                     logs.debug(
                         f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, '
                         f'车厢宽度：{round(rp.W, 2)}, '
+                        f'异形车头前端宽度：{round(rp.head["W"], 2)}, '
+                        f'异形车头长度：{round(rp.head["L"], 2)}, '
                         f'箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}, '
-                        f'混装 block 位置：{mixture_block_positions or "无"}')
+                        f'混装 block 位置：{mixture_block_positions or "无"}, '
+                        f'异形车头 block 位置：{head_block_positions or "无"}')
                 elif mes_hex == cmd_get_per_count:
                     # 发送单面信息
                     pallet_cnt = rp.cal_floor_count()
+                    _current_face_width = rp.current_face_car_width()
                     if config_be['use_corner']:
                         dis_y, dis_x, count = socket_client.create_tcp_client("192.168.10.100", 9002,
                                                                                 b'\xff\xfe\x01\x00\x01\xfd')
                         logs.warning(f"角点个数：{count}")
-                        logs.warning(f"value between corners and car width: {dis_y - rp.W:.2f}")
+                        logs.warning(
+                            "value between corners and current face width: "
+                            f"{dis_y - _current_face_width:.2f}")
                     # 每行抓数：按当前面(boxes[0]所属)实时查，多条 regular 各面精确
                     try:
                         _n_per_row = rp.cal_n_per_row()
@@ -1854,7 +2017,9 @@ def main():
                     gripper_wall_clearance = None
                     last_grab_action = action          # 记录当前抓，供随后 cmd_stacking 对齐序号
                     last_grab_box_type = action.get('box_type', rp.box_type)
-                    last_grab_car_width = rp.W
+                    action_car_width = _action_car_width(action, rp)
+                    action_p1_right_wall = _action_p1_right_wall(action, rp)
+                    last_grab_car_width = action_car_width
                     last_grab_block_type = rp.block_type
                     last_grab_detection_gap = None
                     # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
@@ -1873,10 +2038,10 @@ def main():
                     # 所处的真实空缺口。检测使用该宽度筛候选；机器人仍收到理论抓宽。
                     if action['area'] in ('p1', 'p3'):
                         try:
-                            _opening_right_wall = rp.W
+                            _opening_right_wall = action_car_width
                             if (action['area'] == 'p1'
                                     and rp.block_type == 'regular'):
-                                _opening_right_wall = rp.W - rp.N2 * rp.l
+                                _opening_right_wall = action_p1_right_wall
                             _opening = be.side_clearance(
                                 action,
                                 left_wall=0,
@@ -1916,7 +2081,7 @@ def main():
                             _y_start      = action['pos'][1]
                             _y_grip_right = _y_start + sum(action['num']) * action['size'][1]
                             _cur_h        = action['pos'][2]
-                            _p1_right_wall = rp.W - rp.N2 * rp.l
+                            _p1_right_wall = action_p1_right_wall
                             def _phys_right_a(a):
                                 """返回已放 P1 抓包含组内缝隙后的物理右边界。"""
                                 return a['pos'][1] + sum(a['num']) * a['size'][1] + sum(a.get('gaps', []))
@@ -1933,7 +2098,7 @@ def main():
                             _y_start       = action['pos'][1]
                             _y_grip_right  = _y_start + sum(action['num']) * action['size'][2]  # p3 y步长=h
                             _cur_h         = action['pos'][2]
-                            _p3_right_wall = rp.W
+                            _p3_right_wall = action_car_width
                             def _phys_right_p3(a):
                                 """返回已放 P3 抓包含组内缝隙后的物理右边界。"""
                                 return a['pos'][1] + sum(a['num']) * a['size'][2] + sum(a.get('gaps', []))
@@ -1958,7 +2123,7 @@ def main():
                                 mixture_clearance = be.mixture_side_clearance(
                                     action,
                                     left_wall=0,
-                                    right_wall=rp.W,
+                                    right_wall=action_car_width,
                                     min_z_overlap=float(
                                         config_be.get('mixture_z_overlap_min', 20.0)),
                                 )
@@ -2029,7 +2194,8 @@ def main():
                                         candidate_offset, direction=action['dir'])
                                 # 整抓在 APP 处不得越过车厢左右边界。
                                 if (candidate_app[1] < 0
-                                        or candidate_app[1] + candidate_size[1] > rp.W):
+                                        or candidate_app[1] + candidate_size[1] >
+                                        action_car_width):
                                     continue
                                 candidate_goal = _candidate_goal(
                                     action, rp, config_be, dis_y, action['dir'])
@@ -2076,10 +2242,12 @@ def main():
                                 f"[MIX-APP] Round.{action['id']} 候选轨迹规划失败，"
                                 f"保持原APP策略: {_mix_path_error}")
 
-                    if config_be['use_corner'] and action['dir'] == 2:
+                    if _corner_compensation_applies(
+                            action, rp, config_be, action['dir']):
                         logs.warning(
                             'Goal has been corrected, value:{:.2f}'.format(
-                                np.clip((dis_y - rp.W), 0, 40)))
+                                np.clip(
+                                    (dis_y - action_car_width), 0, 40)))
 
                     # 运动学辅助：奇异性/限位检查 + x_app 自动调整
                     if kin is not None:
@@ -2133,7 +2301,8 @@ def main():
                             try:
                                 gripper_wall_clearance = \
                                     be.mixture_gripper_wall_clearance(
-                                        action, left_wall=0, right_wall=rp.W)
+                                        action, left_wall=0,
+                                        right_wall=action_car_width)
                                 if gripper_wall_clearance['collision']:
                                     _grip_issue = (
                                         "混装固定手抓与车厢侧壁干涉: "
@@ -2244,7 +2413,9 @@ def main():
                             path_issues.append(issue_text)
                             logs.warning(f"[CHK-HEIGHT] Round.{action['id']} {issue_text}")
                         if obstacles:
-                            X_chk = SearchSpace(np.array([(0, rp.L), (0, rp.W), (0, rp.H)]), obstacles)
+                            X_chk = SearchSpace(np.array([
+                                (0, rp.L), (0, action_car_width), (0, rp.H)
+                            ]), obstacles)
                             # 只检查过渡/接近点（x0,x1,x_app），落箱点本身不做障碍检测
                             for pt_idx in range(3):
                                 if not X_chk.obstacle_free((path[pt_idx][0], path[pt_idx][1], path[pt_idx][2]), size):
@@ -2287,7 +2458,7 @@ def main():
                                         a['pos'][1] for a in placed
                                         if a['pos'][1] >= y_grip_right]
                                     p1_left_wall = 0
-                                    p1_right_wall = rp.W - rp.N2 * rp.l
+                                    p1_right_wall = action_p1_right_wall
                                     # 与垛型生成 dir 的口径保持一致：左右距离按当前抓
                                     # 尚未开缝时的手抓占宽计算，不把当前抓 gaps 计入
                                     # 右边界。已经放置的箱体仍使用 _phys_right，保留
@@ -2346,6 +2517,10 @@ def main():
                             'box_type': str(action.get('box_type', rp.box_type)),
                             'area': action['area'],
                             'dir': int(action['dir']),
+                            'is_head': bool(action.get('is_head', False)),
+                            'head_depth_x': round(
+                                float(action.get('head_depth_x', 0.0)), 2),
+                            'car_width': round(action_car_width, 2),
                             'app': [round(float(value), 2) for value in x_app],
                             'goal': [round(float(value), 2) for value in x_goal],
                             'cost_sec': round(end_time - start_time, 4),

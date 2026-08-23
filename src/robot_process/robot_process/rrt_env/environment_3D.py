@@ -41,6 +41,167 @@ def _mixture_box_count(mixture_face):
     )
 
 
+def _is_head_entry(entry):
+    """读取下一层垛型条目的异形车头标志，兼容常见键名。"""
+    return bool(entry.get(
+        'Ishead', entry.get('isHead', entry.get('ishead', False))))
+
+
+def _physical_box_length(block, box_type):
+    """返回箱型沿车厢纵深方向的物理长度，不叠加建模 reserve。"""
+    box_configs = block.get('box', {}) or {}
+    box_type = str(box_type or '')
+    if not box_type:
+        box_list = block.get('box_list', []) or []
+        if box_list:
+            box_type = str(box_list[0])
+        elif len(box_configs) == 1:
+            box_type = str(next(iter(box_configs)))
+    if box_type not in box_configs:
+        raise ValueError(f"异形车头纵深计算找不到箱型 {box_type or '空'}")
+    size = box_configs[box_type].get('size', {}) or {}
+    length = float(size.get('L', size.get('l', 0.0)))
+    if not math.isfinite(length) or length <= 0:
+        raise ValueError(f"箱型 {box_type} 的物理长度L无效: {length}")
+    return length
+
+
+def _block_face_specs(block):
+    """按真实生成顺序返回一个 block 的各面纵深和显式 Ishead 标记。
+
+    常规垛每个 F13 面以及 E=1 的前置尾料面各占一个箱长；梯形每条
+    Trapezoid 占一个箱长；混装面取所有条目 ``Pos.X + 箱长`` 的最大值，
+    因而不同箱型或前后错位时不会被平均箱长低估。
+    """
+    regular = block.get('regular', []) or []
+    trapezoid = block.get('trapezoid', []) or []
+    mixture = block.get('mixture', []) or []
+    specs = []
+
+    if regular:
+        for entry in regular:
+            length = _physical_box_length(block, entry.get('Type', ''))
+            is_head = _is_head_entry(entry)
+            for _ in range(max(0, int(entry.get('F13', 0)))):
+                specs.append({'depth': length, 'explicit_is_head': is_head})
+            if (int(entry.get('E', 0)) == 1 and
+                    int(entry.get('Nx', 0)) > 0):
+                specs.append({'depth': length, 'explicit_is_head': is_head})
+        return specs
+
+    if trapezoid:
+        for entry in trapezoid:
+            specs.append({
+                'depth': _physical_box_length(
+                    block, entry.get('Type', '')),
+                'explicit_is_head': _is_head_entry(entry),
+            })
+        return specs
+
+    if mixture:
+        for face_index, face in enumerate(mixture, start=1):
+            max_end = 0.0
+            is_head = _is_head_entry(face)
+            items = _mixture_items(face)
+            for item in items:
+                pos = item.get('Pos', item.get('pos', {})) or {}
+                pos_x = float(pos.get('X', pos.get('x', 0.0)))
+                if not math.isfinite(pos_x) or pos_x < 0:
+                    raise ValueError(
+                        f"Mixture 面{face_index}的Pos.X无效: {pos_x}")
+                max_end = max(
+                    max_end,
+                    pos_x + _physical_box_length(
+                        block, item.get('Type', item.get('type', ''))),
+                )
+                is_head = is_head or _is_head_entry(item)
+            specs.append({
+                'depth': max_end,
+                'explicit_is_head': is_head,
+            })
+        return specs
+
+    return specs
+
+
+def _attach_head_face_geometry(blocks):
+    """为完整订单的每个面附加异形车头几何信息。
+
+    block/面按规划顺序视为从车头向车尾排列。第一个面从纵深0开始，下一面
+    起点由上一面真实占用纵深推进。``CarCondition.head`` 有效时，未显式标记
+    Ishead 的前部面也按累计纵深自动识别；Regular/Mixture/Trapezoid 下的
+    Ishead 则作为显式标记。宽度取当前面靠车头一侧的最窄值。
+    """
+    if not blocks:
+        return
+    first_car = blocks[0].get('car', {}) or {}
+    body_size = first_car.get('size', {}) or {}
+    body_width = float(body_size.get('W', body_size.get('w', 0.0)))
+    if not math.isfinite(body_width) or body_width <= 0:
+        raise ValueError(f"车厢原始宽度W无效: {body_width}")
+
+    head_cfg = first_car.get('head', {}) or {}
+    head_length = float(head_cfg.get('L', head_cfg.get('l', 0.0)))
+    head_width = float(head_cfg.get('W', head_cfg.get('w', 0.0)))
+    head_height = float(head_cfg.get('H', head_cfg.get('h', 0.0)))
+    head_configured = any(
+        abs(value) > 1e-6 for value in
+        (head_length, head_width, head_height))
+
+    block_specs = [_block_face_specs(block) for block in blocks]
+    explicit_head = any(
+        spec['explicit_is_head']
+        for specs in block_specs for spec in specs)
+    if head_configured or explicit_head:
+        if (not math.isfinite(head_length) or head_length <= 0 or
+                not math.isfinite(head_width) or head_width <= 0 or
+                head_width > body_width):
+            raise ValueError(
+                "异形车头尺寸无效：需要 head.L>0、0<head.W<=original.W，"
+                f"当前head.L={head_length}, head.W={head_width}, "
+                f"original.W={body_width}")
+        has_head_geometry = True
+    else:
+        has_head_geometry = False
+
+    depth_x = 0.0
+    for block, specs in zip(blocks, block_specs):
+        geometry = {}
+        for face_number, spec in enumerate(specs, start=1):
+            inferred = (
+                has_head_geometry and depth_x < head_length - 1e-6)
+            explicit = bool(spec['explicit_is_head'])
+            is_head = explicit or inferred
+            if is_head and has_head_geometry:
+                ratio = min(max(depth_x / head_length, 0.0), 1.0)
+                car_width = head_width + (
+                    body_width - head_width) * ratio
+            else:
+                car_width = body_width
+            geometry[face_number] = {
+                'depth_x': depth_x,
+                'face_depth': float(spec['depth']),
+                'car_width': float(car_width),
+                'is_head': bool(is_head),
+                'explicit_is_head': explicit,
+                'source': (
+                    'explicit+depth' if explicit and inferred
+                    else 'explicit' if explicit
+                    else 'depth' if inferred
+                    else 'normal'),
+            }
+            depth_x += float(spec['depth'])
+        block['_head_face_geometry'] = geometry
+
+
+def build_robot_positions(config_data):
+    """按完整订单构造 RobotPosition 列表，并跨 block 连续计算异形宽度。"""
+    blocks = config_data if isinstance(config_data, list) else [config_data]
+    prepared = copy.deepcopy(blocks)
+    _attach_head_face_geometry(prepared)
+    return [RobotPosition(block) for block in prepared]
+
+
 class Box:
     """按放置姿态保存单箱尺寸和左下前角位置。"""
 
@@ -70,6 +231,12 @@ class RobotPosition:
 
     def __init__(self, config_data):
         """读取单个 block 配置并立即生成完整的逐抓队列。"""
+        # 单独构造 RobotPosition（测试/离线工具）时也生成面级信息；正式主流程
+        # 使用 build_robot_positions 一次处理完整订单，保证纵深跨 block 连续。
+        if '_head_face_geometry' not in config_data:
+            prepared = copy.deepcopy(config_data)
+            _attach_head_face_geometry([prepared])
+            config_data = prepared
         # 箱型尺寸会叠加订单中的 reserve，后续动作和碰撞环境均使用有效尺寸。
         self.box_configs = config_data['box']
         self.box_type = config_data['box_list'][0]
@@ -89,12 +256,28 @@ class RobotPosition:
         self.W = round(config_data['car']['size']['W'])
         self.H = round(config_data['car']['size']['H'])
         self.RW = round(config_data['car']['reserve']['W'])
+        head_cfg = config_data['car'].get('head', {}) or {}
+        self.head = {
+            'L': float(head_cfg.get('L', head_cfg.get('l', 0.0))),
+            'W': float(head_cfg.get('W', head_cfg.get('w', 0.0))),
+            'H': float(head_cfg.get('H', head_cfg.get('h', 0.0))),
+        }
 
         # block 类型与对应字段（互斥）
         self.regular   = config_data.get('regular',   []) or []
         self.trapezoid = config_data.get('trapezoid', []) or []
         self.mixture   = config_data.get('mixture',   []) or []
         self.block_type = self._detect_block_type()
+        self.head_face_geometry = {
+            int(face_number): dict(values)
+            for face_number, values in
+            (config_data.get('_head_face_geometry', {}) or {}).items()
+        }
+        # Block 本身没有 Ishead；它位于 Regular/Mixture/Trapezoid 下一层。
+        # block 是否处于异形区域由完整订单预处理后的面级结果汇总。
+        self.is_head = any(
+            bool(values.get('is_head'))
+            for values in self.head_face_geometry.values())
 
         # regular 参数（仅 regular block 有效，其他类型置 0 以兼容 box_count 等公式）
         # N1/N2/N3: P1每层/P2每列/P3每行箱数；T12/T3: P1-P2/P3层数；
@@ -137,6 +320,7 @@ class RobotPosition:
         self.boxes = []
         self.paths = []
         self._id = 0
+        self._face_p1_right_walls = {}
 
         self.read_robot_offset()
 
@@ -171,6 +355,20 @@ class RobotPosition:
             'grab_p3': grip['P3'][0] if grip.get('P3') else 2,
         }
 
+    def face_car_width(self, num_F):
+        """返回指定面的可用车宽；普通区域保持原始车厢宽度。"""
+        geometry = self.head_face_geometry.get(int(num_F), {})
+        return float(geometry.get('car_width', self.W))
+
+    def current_face_car_width(self):
+        """返回当前待执行面的车宽，队列为空时回退原始车宽。"""
+        if self.boxes:
+            return float(self.boxes[0].get('car_width', self.W))
+        for action in self.robot_offsets:
+            if action != 'done':
+                return float(action.get('car_width', self.W))
+        return float(self.W)
+
     def _emit(self, area, num, num_F, dir_, pos, is_tail=False,
               box_type=None, box_size=None, box_num_signal=None):
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
@@ -192,16 +390,26 @@ class RobotPosition:
                 num_int += 10
         else:
             num_int = int(box_num_signal)
+        face_geometry = self.head_face_geometry.get(int(num_F), {})
+        car_width = float(face_geometry.get('car_width', self.W))
+        p1_right_wall = float(
+            self._face_p1_right_walls.get(int(num_F), car_width))
+        head_depth_x = float(face_geometry.get('depth_x', 0.0))
+        is_head = bool(face_geometry.get('is_head', False))
         self.robot_offsets.append({
             'id': self._id, 'area': area, 'num': num_list, 'gaps': [], 'num_F': num_F,
             'action': 0, 'dir': dir_, 'pos': pos, 'size': action_box_size,
             'box_type': action_box_type, 'grab_num_p1': params['grab_p1'],
+            'car_width': car_width, 'p1_right_wall': p1_right_wall,
+            'head_depth_x': head_depth_x, 'is_head': is_head,
         })
         self.boxes.append({
             'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F,
             'action': 0, 'area_cfg': 0, 'is_tail': is_tail,
             'is_two_grab_row_last': False,
             'box_type': action_box_type, 'size': action_box_size,
+            'car_width': car_width, 'head_depth_x': head_depth_x,
+            'is_head': is_head,
         })
 
     @staticmethod
@@ -406,12 +614,17 @@ class RobotPosition:
             N1, N2, N3 = reg['N1'], reg['N2'], reg['N3']
             T12, T3, F13, F2 = reg['T12'], reg['T3'], reg['F13'], reg['F2']
             E, Nx, Stack, Group = reg['E'], reg['Nx'], reg['Stack'], reg['Group']
-            # P1 可分配的 y 方向缝隙宽度（车厢宽 - P2占用 - P1箱体总宽）
-            gap = self.W - N2 * self.l - N1 * self.w
             p2_filled, grab_p2, p2_f = False, 0, 0
             E_ = Nx
+            last_face_width = float(self.W)
             for f in range(F13):
                 num_F_reg = num_F_base + f + 1
+                face_width = self.face_car_width(num_F_reg)
+                last_face_width = face_width
+                # P1 可分配的Y向缝隙：当前面车宽-P2占用-P1箱体总宽。
+                gap = face_width - N2 * self.l - N1 * self.w
+                self._face_p1_right_walls[num_F_reg] = (
+                    face_width - N2 * self.l)
                 for t in range(T12):
                     # brick 奇偶用全局常规面号 reg_face_base+f，保证跨条连续
                     pattern_index = (reg_face_base + f + t) % 2
@@ -421,7 +634,10 @@ class RobotPosition:
                         p2_filled = True
                         grab_p2 = self.grab_num_p2 if (p2_f + self.grab_num_p2) < F2 else F2 - p2_f
                         for i in range(N2):
-                            self._emit('p2', grab_p2, num_F_reg, 2, [0, self.W - (i + 1) * self.l, t * self.h])
+                            self._emit(
+                                'p2', grab_p2, num_F_reg, 2,
+                                [0, face_width - (i + 1) * self.l,
+                                 t * self.h])
                     # P1：主区，按 Stack/Group 分组放置
                     self._emit_p1_groups(
                         g, s, gap, t * self.h, num_F_reg, N1,
@@ -437,13 +653,13 @@ class RobotPosition:
                 _z_tail = T12 * self.h + (T3 if N3 != 0 else 0) * self.w
                 # E==2 顶置尾料（每面完成后追加到 P3 顶层，箱子侧立，仅1xx允许）
                 if E == 2 and E_ != 0:
-                    N3_ = int(self.W // self.h) if N3 == 0 else N3
+                    N3_ = int(face_width // self.h) if N3 == 0 else N3
                     Nx_ = min(N3_, E_)
                     self._emit_p3_row(Nx_, _z_tail, num_F_reg)
                     E_ -= Nx_
                 # E==3 顶置尾料（每面完成后追加到 P1 顶层，箱子竖放，仅2xx/3xx）
                 elif E == 3 and E_ != 0:
-                    N1_ = int((self.W - self.RW) // self.w)
+                    N1_ = int((face_width - self.RW) // self.w)
                     Nx_ = min(N1_, E_)
                     self._emit_p1_simple(Nx_, self.grab_num_p1, _z_tail, num_F_reg,
                                          tail=True)
@@ -452,18 +668,25 @@ class RobotPosition:
                 self.boxes[-1]['action'] = 1
 
             if E == 2 and E_ != 0:
-                N3_cap = int(self.W // self.h) if N3 == 0 else N3
+                N3_cap = int(last_face_width // self.h) if N3 == 0 else N3
                 _logger.warning(
                     f"E==2 尾料未完全分配，剩余 {E_} 个（Nx={Nx}, F13={F13}, N3_={N3_cap}）")
             if E == 3 and E_ != 0:
                 _logger.warning(
-                    f"E==3 尾料未完全分配，剩余 {E_} 个（Nx={Nx}, F13={F13}, N1_={int((self.W - self.RW) // self.w)}）")
+                    f"E==3 尾料未完全分配，剩余 {E_} 个（Nx={Nx}, F13={F13}, "
+                    f"N1_={int((last_face_width - self.RW) // self.w)}）")
 
             faces_used = F13
             # E==1 前置尾料（本条额外占 1 面）
             if Nx != 0 and E == 1:
-                N1_tail = int((self.W - self.RW) // self.w)
                 num_F_tail = num_F_base + F13 + 1
+                tail_width = self.face_car_width(num_F_tail)
+                self._face_p1_right_walls[num_F_tail] = tail_width
+                N1_tail = int((tail_width - self.RW) // self.w)
+                if N1_tail <= 0:
+                    raise ValueError(
+                        f"常规尾料面可用宽度不足：面{num_F_tail}，"
+                        f"车宽={tail_width:.1f}, RW={self.RW}, 箱宽={self.w}")
                 faces_used += 1
                 Nx_t, Nx_rem = divmod(Nx, N1_tail)
                 for t in range(Nx_t):
@@ -483,13 +706,15 @@ class RobotPosition:
         """梯形垛：逐面处理，每面 P1 + P3 + 尾料。门口区走简单顺序放置。"""
         for f, trap in enumerate(self.trapezoid):
             num_F_trap = f + 1
+            face_width = self.face_car_width(num_F_trap)
+            self._face_p1_right_walls[num_F_trap] = face_width
             # 梯形 P1
             for t in range(trap['T1']):
                 if trap['Isdoor']:
                     # 门口区：简单顺序放置，无间隙分组；用 tail 分批规则确保顺序为升序（小→大）
                     self._emit_p1_simple(trap['N1'], self.grab_num_p1, t * self.h, num_F_trap, tail=True)
                 else:
-                    trap_gap = (self.W - trap['N1'] * self.w -
+                    trap_gap = (face_width - trap['N1'] * self.w -
                                 (self.l - self.w) * (trap['Group'][0][0] // 10 + trap['Group'][0][1] // 10))
                     pattern_index = (f + t) % 2
                     g, s = self._layer_pattern(f, t, trap['Stack'], trap['Group'])
@@ -503,7 +728,7 @@ class RobotPosition:
             # 仅放一层，超出当前P1单层容量的部分丢弃。
             if trap['Nx'] != 0:
                 z_tail = trap['T1'] * self.h + trap['T3'] * self.w
-                N_cap = int((self.W - self.RW) // self.w)
+                N_cap = int((face_width - self.RW) // self.w)
                 Nx_ = min(N_cap, trap['Nx'])
                 if trap['Nx'] > N_cap:
                     _logger.warning(
@@ -518,6 +743,8 @@ class RobotPosition:
         """按混装 Items 生成动作；1XX 的 Num>=10 解码为 P3 放置。"""
         for face_idx, mix in enumerate(self.mixture):
             num_F = face_idx + 1
+            face_width = self.face_car_width(num_F)
+            self._face_p1_right_walls[num_F] = face_width
             emitted_before = len(self.robot_offsets)
 
             items = _mixture_items(mix)
@@ -566,11 +793,11 @@ class RobotPosition:
                         f"箱型 {box_type} 的 {area.upper()} 单抓能力 {grab_limit}")
                 y_span = box_h if area == 'p3' else box_w
                 z_span = box_w if area == 'p3' else box_h
-                if pos_y + actual_num * y_span > self.W:
+                if pos_y + actual_num * y_span > face_width:
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项沿车宽超界："
                         f"Y({pos_y}) + 真实数量({actual_num})×"
-                        f"{area.upper()}宽度({y_span}) > {self.W}")
+                        f"{area.upper()}宽度({y_span}) > {face_width:.1f}")
                 if pos_x + box_l > self.L:
                     raise ValueError(
                         f"Mixture 面{num_F}第{item_idx + 1}项沿车深超界："
@@ -585,7 +812,7 @@ class RobotPosition:
                 center_y = pos_y + actual_num * y_span * 0.5
                 # 这里只生成失败回退用的初始方向；cmd_get_path 会结合当时已经
                 # 码放的空间邻箱和左右间隙，动态修正混装 P1 抓的实际方向。
-                dir_ = 1 if center_y <= self.W * 0.5 else 2
+                dir_ = 1 if center_y <= face_width * 0.5 else 2
                 self._emit(
                     area, actual_num, num_F, dir_, internal_pos,
                     box_type=box_type, box_size=box_size,

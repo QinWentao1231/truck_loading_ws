@@ -1,103 +1,104 @@
 syntax = "proto3";
 
-// Çó½â½á¹û×Ü°ü
+// æ±‚è§£ç»“æœæ€»åŒ…
 message Answer{
-    repeated Block blocks = 1; // ¶Ñ¶â¶ÓÁĞ
-    Index index = 2; // È«¾ÖÍ³¼Æ²ÎÊı
-    SpecialInd SpecialInd = 3; // P1P3À´ÁÏÌØÊâ·­×ªĞÅÏ¢
+    repeated Block blocks = 1; // å †å›é˜Ÿåˆ—
+    Index index = 2; // å…¨å±€ç»Ÿè®¡å‚æ•°
+    SpecialInd SpecialInd = 3; // P1P3æ¥æ–™ç‰¹æ®Šç¿»è½¬ä¿¡æ¯
 }
 
-// ¶Ñ¶âĞÅÏ¢(Í¬Ò»¶Ñ¶âÖĞ½ö°üº¬Ò»ÖÖ¶âĞÍ£¬ÆäÓàÁ½ÖÖ¶ÓÁĞÎª¿Õ)
+// å †å›ä¿¡æ¯(åŒä¸€å †å›ä¸­ä»…åŒ…å«ä¸€ç§å›å‹ï¼Œå…¶ä½™ä¸¤ç§é˜Ÿåˆ—ä¸ºç©º)
 message Block{
-    int32 queueId = 1; // ¶ÓÁĞÖĞĞòºÅ
-    string orderId = 2; // ¶ÔÓ¦×Ó¶©µ¥ºÅ
-    repeated Regular regular = 3; // ¹æÕû¶â
-    repeated Mixture mixture = 4; // »ì×°Ãæ
-    repeated Trapezoid trapezoid = 5; // ÌİĞÎÎ²¶â
-    repeated Info blockInfo = 6; // ¶âĞÍĞÅÏ¢
+    int32 queueId = 1; // é˜Ÿåˆ—ä¸­åºå·
+    string orderId = 2; // å¯¹åº”å­è®¢å•å·
+    repeated Regular regular = 3; // è§„æ•´å›
+    repeated Mixture mixture = 4; // æ··è£…é¢
+    repeated Trapezoid trapezoid = 5; // æ¢¯å½¢å°¾å›
+    repeated Info blockInfo = 6; // å›å‹ä¿¡æ¯
 }
 
-// ¹æÕû¶â
+// è§„æ•´å›
 message Regular{
-    int32 N1 = 1; // P1Ã¿ĞĞ¸öÊı
-    int32 N2 = 2; // P2Ã¿ĞĞ¸öÊı
-    int32 N3 = 3; // P3Ã¿ĞĞ¸öÊı
-    int32 T12 = 4; // P1P2¸ß¶ÈĞĞÊı
-    int32 T3 = 5; // P3¸ß¶ÈĞĞÊı
-    int32 F13 = 6; // P1P3ÃæÊı
-    int32 F2 = 7; // P2ÃæÊı
-    int32 E = 8; // Î²ÁÏ¶Ñ·ÅĞÎÊ½(0 ÎŞ£¬1 P1Ç°ÖÃ£¬2 P3¶¥ÖÃ)
-    int32 Nx = 9; // Î²ÁÏ¸öÊı
-    repeated Stack Stack = 10; // ¶Ñµş·ìÏ¶ÅÅ²¼
-    repeated Group Group = 11; // ¶Ñµş°´×¦·Ö×é
-    string Type = 12; // ÏäĞÍ´úºÅ
+    int32 N1 = 1; // P1æ¯è¡Œä¸ªæ•°
+    int32 N2 = 2; // P2æ¯è¡Œä¸ªæ•°
+    int32 N3 = 3; // P3æ¯è¡Œä¸ªæ•°
+    int32 T12 = 4; // P1P2é«˜åº¦è¡Œæ•°
+    int32 T3 = 5; // P3é«˜åº¦è¡Œæ•°
+    int32 F13 = 6; // P1P3é¢æ•°
+    int32 F2 = 7; // P2é¢æ•°
+    int32 E = 8; // å°¾æ–™å½¢å¼ï¼š0æ— ï¼Œ1å‰ç½®P1ï¼Œ2é¡¶ç½®P3ï¼Œ3é¡¶ç½®P1
+    int32 Nx = 9; // å°¾æ–™ä¸ªæ•°
+    repeated Stack Stack = 10; // å †å ç¼éš™æ’å¸ƒ
+    repeated Group Group = 11; // å †å æŒ‰çˆªåˆ†ç»„
+    string Type = 12; // ç®±å‹ä»£å·
+    bool Ishead = 13; // å½“å‰è§„æ•´å›æ˜¯å¦ä½äºå¼‚å½¢è½¦å¤´
 }
 
-// »ì×°Ãæ(ÃæÊı¹Ì¶¨Îª1£¬È«P1¶Ñ·Å£¬ÏÂ·½ÏäÌåÎªÇ°¶âÊÕÎ²£¬ÉÏ·½ÏäÌåÎªºó¶â¿ªÍ·)
-
+// æ··è£…é¢ï¼šBlock.mixture çš„å…¨éƒ¨æ¡ç›®å…±åŒç»„æˆä¸€ä¸ªé¢ï¼ŒæŒ‰åˆ—è¡¨é¡ºåºé€æŠ“æ”¾ç½®ã€‚
+// é»˜è®¤æŒ‰P1æ”¾ç½®ï¼›ä»…1XXç®±å‹å¯ç”¨ Num>=10 ç¼–ç P3ä¾§ç«‹ï¼Œä¸ªä½æ•°ä¸ºçœŸå®ç®±æ•°ã€‚
 message Mixture{
-    string Type = 1; // ÏäĞÍ´úºÅ
-    int32 Num = 2; // ÏäĞÍÊıÁ¿
-    Position Pos = 3; // ×óÏÂÇ°½ÇµãÎ»ÖÃ×ø±ê
-    bool Ishead = 4; // ÊÇ·ñĞèÒª³µÍ·±äĞÎ
+    string Type = 1; // ç®±å‹ä»£å·
+    int32 Num = 2; // æ¥æ–™æ•°é‡ï¼›1XXçš„P3ä¾§ç«‹ä½¿ç”¨â€œ10+çœŸå®ç®±æ•°â€ç¼–ç 
+    Position Pos = 3; // å·¦ä¸‹å‰è§’ç‚¹ä½ç½®åæ ‡
+    bool Ishead = 4; // å½“å‰æ··è£…é¢æ˜¯å¦ä½äºå¼‚å½¢è½¦å¤´
 }
 
 message Position{
-    float X = 1; // ³µÏáÉî¶È·½Ïò×ø±ê£¬Ç°Îª0
-    float Y = 2; // ³µÏá¿í¶È·½Ïò×ø±ê£¬×óÎª0
-    float Z = 3; // ³µÏá¸ß¶È·½Ïò×ø±ê£¬ÏÂÎª0
+    float X = 1; // è½¦å¢æ·±åº¦æ–¹å‘åæ ‡ï¼Œå‰ä¸º0
+    float Y = 2; // è½¦å¢å®½åº¦æ–¹å‘åæ ‡ï¼Œå·¦ä¸º0
+    float Z = 3; // è½¦å¢é«˜åº¦æ–¹å‘åæ ‡ï¼Œä¸‹ä¸º0
 }
 
-// ÌİĞÎÎ²¶â(ÃæÊı¹Ì¶¨Îª1£¬ÏÂ·½P1¶Ñ·Å£¬ÉÏ·½P3¶Ñ·Å£¬ÈçÓĞÎ²ÁÏÒÔP3¶¥ÖÃĞÎÊ½¶Ñ·Å)
+// æ¢¯å½¢å°¾å›ï¼ˆé¢æ•°å›ºå®šä¸º1ï¼Œä¸‹æ–¹P1å †æ”¾ï¼Œä¸Šæ–¹P3å †æ”¾ï¼Œå¦‚æœ‰å°¾æ–™ä»¥P1ç«–æ”¾å½¢å¼é¡¶ç½®ï¼‰
 message Trapezoid{
-    int32 N1 = 1; // P1Ã¿ĞĞ¸öÊı
-    int32 N3 = 2; // P3Ã¿ĞĞ¸öÊı
-    int32 T1 = 3; // P1¸ß¶ÈĞĞÊı
-    int32 T3 = 4; // P3¸ß¶ÈĞĞÊı
-    int32 Nx = 5; // Î²ÁÏ¸öÊı
-    repeated Stack Stack = 6; // ¶Ñµş·ìÏ¶ÅÅ²¼
-    repeated Group Group = 7; // ¶Ñµş°´×¦·Ö×é
-    bool Isdoor = 8; // ÊÇ·ñĞèÒªÎ²ÃÅ±äĞÎ
-    string Type = 9; // ÏäĞÍ´úºÅ
-    bool Ishead = 10; // ÊÇ·ñĞèÒª³µÍ·±äĞÎ
+    int32 N1 = 1; // P1æ¯è¡Œä¸ªæ•°
+    int32 N3 = 2; // P3æ¯è¡Œä¸ªæ•°
+    int32 T1 = 3; // P1é«˜åº¦è¡Œæ•°
+    int32 T3 = 4; // P3é«˜åº¦è¡Œæ•°
+    int32 Nx = 5; // å°¾æ–™ä¸ªæ•°
+    repeated Stack Stack = 6; // å †å ç¼éš™æ’å¸ƒ
+    repeated Group Group = 7; // å †å æŒ‰çˆªåˆ†ç»„
+    bool Isdoor = 8; // æ˜¯å¦éœ€è¦å°¾é—¨å˜å½¢
+    string Type = 9; // ç®±å‹ä»£å·
+    bool Ishead = 10; // å½“å‰æ¢¯å½¢å›æ˜¯å¦ä½äºå¼‚å½¢è½¦å¤´
 }
 
-// ¶Ñµş·ìÏ¶ÅÅ²¼
+// å †å ç¼éš™æ’å¸ƒ
 message Stack{
-    repeated int32 Width = 1; // ´Ó×óÖÁÓÒÃ¿¸öÏäÌåÓëÏäÌå»òÇ½Ãæ¼äµÄ·ìÏ¶¿í¶È£¬°Ù·Ö±È±íÊ¾£¬½ö±íÊ¾P1P2ÕûĞĞ
+    repeated int32 Width = 1; // ä»å·¦è‡³å³æ¯ä¸ªç®±ä½“ä¸ç®±ä½“æˆ–å¢™é¢é—´çš„ç¼éš™å®½åº¦ï¼Œç™¾åˆ†æ¯”è¡¨ç¤ºï¼Œä»…è¡¨ç¤ºP1P2æ•´è¡Œ
 }
 
-// ¶Ñµş°´×¦·Ö×é
+// å †å æŒ‰çˆªåˆ†ç»„
 message Group{
-    repeated int32 Unit = 1; // ´Ó×óÖÁÓÒÃ¿×¦ÏäÌåÊıÁ¿·Ö×é£¬½ö±íÊ¾ĞĞÄÚËùÓĞP1ÏäÌå
+    repeated int32 Unit = 1; // ä»å·¦è‡³å³æ¯çˆªç®±ä½“æ•°é‡åˆ†ç»„ï¼Œä»…è¡¨ç¤ºè¡Œå†…æ‰€æœ‰P1ç®±ä½“
 }
 
 message Info {
-    string orderId = 1; // ³ö¿âµ¥µØÖ·
-    string contractId = 2; // ºÏÍ¬ºÅ
-    string materialId = 3; // ÎïÁÏ´úºÅ
-    string type = 4; // ÏäĞÍ´úºÅ
-    int32 Nt = 5; // ÏäĞÍÊıÁ¿
+    string orderId = 1; // å‡ºåº“å•åœ°å€
+    string contractId = 2; // åˆåŒå·
+    string materialId = 3; // ç‰©æ–™ä»£å·
+    string type = 4; // ç®±å‹ä»£å·
+    int32 Nt = 5; // ç®±å‹æ•°é‡
 }
 
-// È«¾ÖÍ³¼Æ²ÎÊı(Ôİ¶¨)
+// å…¨å±€ç»Ÿè®¡å‚æ•°(æš‚å®š)
 message Index{
-    int32 Ns = 1; // Õû³µ×ÜÏäÊı
-    float Us = 2; // Õû³µ×Ü¿Õ¼ä×°ÔØÂÊ
-    float Um = 3; // ×ÜÍâ½Ó³¤·½Ìå×°ÔØÂÊ
-    repeated int32 Gn = 4; // P1P2P3×Ü×¥Êı
-    float Tp = 5; // Ô¤¹À×ÜÂë¶âÊ±³¤
+    int32 Ns = 1; // æ•´è½¦æ€»ç®±æ•°
+    float Us = 2; // æ•´è½¦æ€»ç©ºé—´è£…è½½ç‡
+    float Um = 3; // æ€»å¤–æ¥é•¿æ–¹ä½“è£…è½½ç‡
+    repeated int32 Gn = 4; // P1P2P3æ€»æŠ“æ•°
+    float Tp = 5; // é¢„ä¼°æ€»ç å›æ—¶é•¿
 }
 
-// P1P3À´ÁÏÌØÊâ·­×ªĞÅÏ¢(PLCÍ¨ÖªÓÃ)
+// P1P3æ¥æ–™ç‰¹æ®Šç¿»è½¬ä¿¡æ¯(PLCé€šçŸ¥ç”¨)
 message SpecialInd{
-    int32 Nt = 1; // Õû³µ×ÜÏäÊı
-    repeated string BoxType = 2; // È«³µ¶âĞÍÏäĞÍË³Ğò
-    repeated int32 BoxNum = 3; // È«³µ¶âĞÍ¸÷ÏäĞÍ¸öÊı
-    int32 BoxP3Sum = 4; // P3²»·­×ª×ÜÊı
-    repeated int32 BoxP3IndNum = 5; // ¸÷¶âP3²»·­×ª¸öÊı
-    repeated int32 BoxP3Ind = 6; // P3²»·­×ªĞòºÅ
-    int32 BoxRightSum = 7; // P1ÓÒ·­×ÜÊı
-    repeated int32 BoxRightNum = 8; // ¸÷¶âP1ÓÒ·­¸öÊı
-    repeated int32 BoxRightInd = 9; // P1ÓÒ·­ĞòºÅ
+    int32 Nt = 1; // æ•´è½¦æ€»ç®±æ•°
+    repeated string BoxType = 2; // å…¨è½¦å›å‹ç®±å‹é¡ºåº
+    repeated int32 BoxNum = 3; // å…¨è½¦å›å‹å„ç®±å‹ä¸ªæ•°
+    int32 BoxP3Sum = 4; // P3ä¸ç¿»è½¬æ€»æ•°
+    repeated int32 BoxP3IndNum = 5; // å„å›P3ä¸ç¿»è½¬ä¸ªæ•°
+    repeated int32 BoxP3Ind = 6; // P3ä¸ç¿»è½¬åºå·
+    int32 BoxRightSum = 7; // P1å³ç¿»æ€»æ•°
+    repeated int32 BoxRightNum = 8; // å„å›P1å³ç¿»ä¸ªæ•°
+    repeated int32 BoxRightInd = 9; // P1å³ç¿»åºå·
 }

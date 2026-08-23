@@ -31,6 +31,7 @@ message Regular{
     repeated Stack Stack = 10; // 堆叠缝隙排布
     repeated Group Group = 11; // 堆叠按爪分组
     string Type = 12; // 箱型代号
+    bool Ishead = 13; // 当前规整垛是否位于异形车头
 }
 
 // 混装面(面数固定为1，全P1堆放，下方箱体为前垛收尾，上方箱体为后垛开头)

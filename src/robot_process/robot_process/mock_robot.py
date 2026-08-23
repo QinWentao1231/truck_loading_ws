@@ -73,12 +73,16 @@ def parse_path_block(block):
 
 
 def handle_get_pallet(sock):
-    """请求并打印整车统计、默认箱型尺寸和混装 block 位置。"""
+    """请求并打印总体信息以及混装/异形车头 block 位置。"""
     sock.sendall(CMD_GET_PALLET)
     n, blocks = recv_response(sock)
-    f0 = parse_floats(blocks[0], 3)
+    f0 = parse_floats(blocks[0], 5)
     f1 = parse_floats(blocks[1], 3)
-    print(f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  车宽={f0[2]:.0f}mm")
+    print(
+        f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  "
+        f"车宽={f0[2]:.0f}mm  head.W={f0[3]:.0f}mm  "
+        f"head.L={f0[4]:.0f}mm"
+    )
     print(f"  箱尺寸 L={f1[0]:.0f} W={f1[1]:.0f} H={f1[2]:.0f}")
     if n >= 3:
         mixture_positions = [
@@ -86,6 +90,12 @@ def handle_get_pallet(sock):
             if position > 0
         ]
         print(f"  混装 block 位置={mixture_positions or '无'}")
+    if n >= 4:
+        head_positions = [
+            int(position) for position in parse_floats(blocks[3], 6)
+            if position > 0
+        ]
+        print(f"  异形车头 block 位置={head_positions or '无'}")
 
 
 def handle_get_per_count(sock):

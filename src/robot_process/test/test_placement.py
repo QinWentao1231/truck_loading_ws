@@ -20,7 +20,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _DIR)
 
 from robot_process_node import parse_planner_json
-from rrt_env.environment_3D import RobotPosition
+from rrt_env.environment_3D import build_robot_positions
 
 # ─── AABB 工具 ────────────────────────────────────────────────────────────────
 
@@ -133,13 +133,13 @@ def test_file(json_path):
     total_grabs  = 0
     total_errors = []
 
-    for bi, block_cfg in enumerate(rpn.glob_data):
-        try:
-            rp = RobotPosition(block_cfg)
-        except Exception as e:
-            print(f'  [ERROR] Block{bi+1} RobotPosition 失败：{e}')
-            continue
+    try:
+        rp_list = build_robot_positions(rpn.glob_data)
+    except Exception as e:
+        print(f'  [ERROR] 完整垛序构造失败：{e}')
+        return
 
+    for bi, rp in enumerate(rp_list):
         box_type = rp.box_type
         n_grabs, errors = check_block(rp, car_W, car_H, bi + 1)
         total_grabs  += n_grabs
