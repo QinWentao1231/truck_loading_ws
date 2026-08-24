@@ -92,8 +92,10 @@ def handle_get_pallet(sock):
 def handle_get_per_count(sock):
     sock.sendall(CMD_GET_PER_COUNT)
     _, blocks = recv_response(sock)
-    f = parse_floats(blocks[0], 2)
-    print(f"  本面箱数={int(f[0])}  箱型={int(f[1])}")
+    f = parse_floats(blocks[0], 4)
+    print(
+        f"  本面箱数={int(f[0])}  箱型={int(f[1])}  "
+        f"每行抓数={int(f[2])}  角点单侧收缩={f[3]:.1f}mm")
 
 
 def handle_get_box(sock):

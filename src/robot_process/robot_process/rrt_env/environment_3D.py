@@ -918,7 +918,8 @@ class RobotPosition:
         self.robot_offsets.append('done')
 
         # 常规/梯形 area_cfg：按同面、同区域、同高度的 y 顺序确定左/中/右；
-        # Group/Stack 两抓行的执行末抓在原位置码上加10（11或13）。
+        # 异形车头 P1 三抓行的最右抓固定为1。Group/Stack 两抓行的执行
+        # 末抓在原位置码上加10（11或13）。
         # 混装面使用三维邻箱关系：4=当前高度的墙边收尾抓，其余为1。
         groups = defaultdict(list)
         for offset in self.robot_offsets:
@@ -927,10 +928,16 @@ class RobotPosition:
             groups[(offset['num_F'], offset['area'], offset['pos'][2])].append(offset)
         id_to_cfg = {}
         for offsets in groups.values():
-            sorted_ids = [o['id'] for o in sorted(offsets, key=lambda o: o['pos'][1])]
-            n = len(sorted_ids)
-            for rank, oid in enumerate(sorted_ids):
+            ordered = sorted(offsets, key=lambda o: o['pos'][1])
+            n = len(ordered)
+            for rank, offset in enumerate(ordered):
+                oid = offset['id']
                 if n == 1 or rank == 0:
+                    id_to_cfg[oid] = 1
+                elif (n == 3 and rank == n - 1
+                      and offset['area'] == 'p1'
+                      and bool(offset.get('is_head', False))):
+                    # 异形车头三抓的最右抓不使用常规右侧位置码3。
                     id_to_cfg[oid] = 1
                 elif rank == n - 1:
                     id_to_cfg[oid] = 3

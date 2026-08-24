@@ -167,6 +167,18 @@ def _action_car_width(action, rp) -> float:
     return float(action.get('car_width', rp.W))
 
 
+def _head_corner_shrink(action, rp) -> float:
+    """返回当前面左右角点各自需要向车内收缩的距离（mm）。
+
+    异形车头按车厢中心线对称处理，因此单侧收缩量为原始车宽与当前面
+    可用车宽差值的一半。普通区域（包括已经超过 head.L 的面）固定返回0，
+    避免把异形区域的补偿继续带到后续码垛面。
+    """
+    if action is None or not bool(action.get('is_head', False)):
+        return 0.0
+    return max(0.0, (float(rp.W) - _action_car_width(action, rp)) * 0.5)
+
+
 def _action_p1_right_wall(action, rp) -> float:
     """返回当前面P1区域右边界，规则垛会扣除同面的P2区域。"""
     return float(action.get(
@@ -240,7 +252,7 @@ def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
 
     # P3 侧立时箱子 z 跨度为原始宽 w；P1 竖放时为原始高 h。
     box_z = action['size'][1] if action['area'] == 'p3' else action['size'][2]
-    if action['pos'][2] + box_z < config_be['p3_init_pos'][2]:
+    if action['pos'][2] + box_z <= config_be['p3_init_pos'][2]:
         x0 = [
             config_be['p1_init_pos'][0],
             config_be['p1_init_pos'][1],
@@ -267,7 +279,7 @@ def _build_p1_p3_approach(action, rp, config_be, reserve_grip,
     if np.isclose(float(action['pos'][2]), 0.0, atol=1e-3):
         x0[0] = 200
 
-    if action['pos'][2] + box_z < config_be['p3_init_pos'][2]:
+    if action['pos'][2] + box_z <= config_be['p3_init_pos'][2]:
         if direction == 1:
             x1_y = (x_app[1] + action['size'][1] / 2
                     if action['pos'][1] < action['size'][1]
@@ -337,6 +349,69 @@ def _check_path_height(path, carried_size, car_height, tolerance=0.5):
             'over_height': top_z - car_height,
         })
     return issues
+
+
+def _check_action_lateral_bounds(action, rp, tolerance=0.5):
+    """检查当前抓的实际箱体是否超出所在区域的车宽边界。
+
+    该检查只计算垛型落箱范围，不进行RRT或轨迹避障。P1多段抓按 ``num``
+    和 ``gaps`` 逐段累计，避免负间隙时只看最终右端而漏掉中间段越界；规则垛
+    P1使用扣除P2后的右边界，P2/P3及其他垛型使用当前面的动态车宽。
+    """
+    area = action['area']
+    left_y = float(action['pos'][1])
+    right_y = left_y
+
+    if area == 'p1':
+        cursor_y = left_y
+        box_width = float(action['size'][1])
+        segment_counts = [int(value) for value in action['num']]
+        segment_gaps = [float(value) for value in action.get('gaps', [])]
+        for segment_index, segment_count in enumerate(segment_counts):
+            segment_start = cursor_y
+            segment_end = segment_start + segment_count * box_width
+            left_y = min(left_y, segment_start, segment_end)
+            right_y = max(right_y, segment_start, segment_end)
+            cursor_y = segment_end
+            if segment_index < len(segment_gaps):
+                cursor_y += segment_gaps[segment_index]
+                left_y = min(left_y, cursor_y)
+                right_y = max(right_y, cursor_y)
+    elif area == 'p3':
+        # P3侧立后，原始箱高是车宽方向的单箱跨度。
+        right_y = left_y + sum(
+            int(value) for value in action['num']) * float(action['size'][2])
+        left_y, right_y = min(left_y, right_y), max(left_y, right_y)
+    elif area == 'p2':
+        # P2多箱沿车深方向排列，车宽方向只占一个箱宽。
+        right_y = left_y + float(action['size'][1])
+        left_y, right_y = min(left_y, right_y), max(left_y, right_y)
+    else:
+        raise ValueError(f"未知放置区域: {area}")
+
+    car_width = _action_car_width(action, rp)
+    if area == 'p1' and rp.block_type == 'regular':
+        right_wall = _action_p1_right_wall(action, rp)
+        boundary_name = 'P1可用右边界'
+    else:
+        right_wall = car_width
+        boundary_name = '当前面右车壁'
+
+    left_overhang = max(0.0, -left_y)
+    right_overhang = max(0.0, right_y - right_wall)
+    if (left_overhang <= tolerance and
+            right_overhang <= tolerance):
+        return None
+    return {
+        'area': area,
+        'left_y': left_y,
+        'right_y': right_y,
+        'car_width': car_width,
+        'right_wall': right_wall,
+        'boundary_name': boundary_name,
+        'left_overhang': left_overhang,
+        'right_overhang': right_overhang,
+    }
 
 
 def _save_face_visualizations(rp, block_number, face_number, stamp,
@@ -623,9 +698,10 @@ def _expected_area_cfg_map(rp_item):
     """由 get_path 动作布局推导每抓应下发的 ``area_cfg``。
 
     常规/梯形垛按同面、同区域、同高度的 Y 顺序得到左/中/右位置码；
-    尾料和 P3 固定为1，两抓行的执行末抓在位置码上加10。混装面则按
-    ``RobotPosition`` 的三维邻箱规则推导墙边收尾码4。推导过程不读取
-    ``box['area_cfg']``，用于校验 cmd_get_box 队列中的实际发送值。
+    异形车头 P1 三抓行的最右抓固定为1。尾料和 P3 固定为1，两抓行的
+    执行末抓在位置码上加10。混装面则按 ``RobotPosition`` 的三维邻箱
+    规则推导墙边收尾码4。推导过程不读取 ``box['area_cfg']``，用于校验
+    cmd_get_box 队列中的实际发送值。
     """
     actions = [item for item in rp_item.ori_offsets if item != 'done']
     boxes_by_id = {
@@ -648,6 +724,10 @@ def _expected_area_cfg_map(rp_item):
         ordered = sorted(grouped_actions, key=lambda item: item['pos'][1])
         for rank, action in enumerate(ordered):
             if len(ordered) == 1 or rank == 0:
+                value = 1
+            elif (len(ordered) == 3 and rank == len(ordered) - 1
+                  and action['area'] == 'p1'
+                  and bool(action.get('is_head', False))):
                 value = 1
             elif rank == len(ordered) - 1:
                 value = 3
@@ -1520,7 +1600,7 @@ def main():
     """启动主服务并循环处理机器人指令，单项任务异常由各自边界兜底记录。"""
     global glob_data, glob_raw_order
     # 日志配置
-    logs.info("***垛序及机器人路径规划程序启动 ver.0.5.6（支持混码）-alpha-for济南烟厂***")
+    logs.info("***垛序及机器人路径规划程序启动 ver.0.5.7（支持混码 & 异形车头）-alpha-for济南烟厂***")
     try:
         try:
             from ament_index_python.packages import get_package_share_directory
@@ -1794,6 +1874,10 @@ def main():
                         logs.warning("机器人已断开连接 ！")
                         break
                     if mes_hex == cmd_chk_path:
+                        # 返回机器人（整轮检查结束后一次性返回1块）：
+                        #   float[0]：三位检查状态XYZ；X=路径、Y=垛序、Z=PLC字段，
+                        #             每位1=通过、2=失败（111=全部通过，222=全部失败/兜底）。
+                        # 批量检查期间只在服务端模拟逐抓路径，不返回中间路径报文。
                         _chk_stamp = time.strftime('%Y%m%d_%H%M%S')
                         chk_session = {
                             'stamp': _chk_stamp,
@@ -1887,11 +1971,13 @@ def main():
                 else:
                     mes_hex = cmd_get_path
                 if mes_hex == cmd_get_pallet:
-                    # 发送总体信息（固定4块）：
-                    #   第1块：总箱数、面数、车宽、head.W、head.L；
-                    #   第2块：箱型参数；
-                    #   第3块：前6个混装 block 序号，按大端float32编码，不足补0.0。
-                    #   第4块：前6个异形车头 block 序号，规则同第3块。
+                    # 返回机器人（固定4块）：
+                    #   第1块float[0:5]：当前block总箱数、面数、车厢宽度、
+                    #                     head.W、head.L（单位均为mm，数量除外）；
+                    #   第2块float[0:3]：当前block默认箱型的有效L/W/H（mm）；
+                    #   第3块float[0:6]：前6个混装block在rp_list中的1起始序号，
+                    #                     不存在或不足6个的位置补0；
+                    #   第4块float[0:6]：前6个异形车头block的1起始序号，补0规则相同。
                     mixture_positions_to_send = mixture_block_positions[:6]
                     mixture_position_slots = [
                         float(position) for position in mixture_positions_to_send
@@ -1934,9 +2020,24 @@ def main():
                         f'混装 block 位置：{mixture_block_positions or "无"}, '
                         f'异形车头 block 位置：{head_block_positions or "无"}')
                 elif mes_hex == cmd_get_per_count:
-                    # 发送单面信息
+                    # 返回机器人（1块）：float[0:4]依次为当前面放置次数、当前箱型、
+                    # 底层每行抓数、异形车头角点单侧收缩量（mm，普通区域为0）。
+                    # 当前面及收缩量全部取自本命令正在读取的
+                    # boxes[0]；队列为空时才回退到下一条待执行路径。这样不依赖
+                    # get_path 的 action 处理时序，重复请求也不会累计收缩量。
                     pallet_cnt = rp.cal_floor_count()
-                    _current_face_width = rp.current_face_car_width()
+                    _current_face = (
+                        rp.boxes[0] if rp.boxes else next(
+                            (item for item in rp.robot_offsets
+                             if item != 'done'), None))
+                    corner_shrink_mm = _head_corner_shrink(
+                        _current_face, rp)
+                    _current_face_width = (
+                        _action_car_width(_current_face, rp)
+                        if _current_face is not None else float(rp.W))
+                    _current_face_key = (
+                        (rp_idx + 1, int(_current_face['num_F']))
+                        if _current_face is not None else None)
                     if config_be['use_corner']:
                         dis_y, dis_x, count = socket_client.create_tcp_client("192.168.10.100", 9002,
                                                                                 b'\xff\xfe\x01\x00\x01\xfd')
@@ -1950,19 +2051,25 @@ def main():
                     except Exception as _e:
                         logs.error(f'每行抓数解析异常：{type(_e).__name__}: {_e}，已发 0 兜底')
                         _n_per_row = 0
-                    _face_box_type = (rp.boxes[0].get('box_type', rp.box_type)
-                                      if rp.boxes else rp.box_type)
+                    _face_box_type = (
+                        _current_face.get('box_type', rp.box_type)
+                        if _current_face is not None else rp.box_type)
                     server.send_message(_build_msg(1, _data_block(
-                        float(pallet_cnt), float(_face_box_type), float(_n_per_row)
+                        float(pallet_cnt), float(_face_box_type),
+                        float(_n_per_row), float(corner_shrink_mm)
                     ) + b'\x00\x00'))
-                    logs.debug(f'单面码垛放置次数：{pallet_cnt}，每行抓数={_n_per_row}')
+                    logs.debug(
+                        f'单面码垛放置次数：{pallet_cnt}，'
+                        f'每行抓数={_n_per_row}，'
+                        f'角点单侧收缩={corner_shrink_mm:.2f}mm，'
+                        f'当前面={_current_face_key or "无"}')
                 elif mes_hex == cmd_get_box:
-                    # 单次来料箱子样式（2块：来料配方 + 当前箱型尺寸）
-                    # box['action'] 语义：
-                    #   0 → 普通，继续
-                    #   1 → 当前码垛面最后一箱，机器人换面
-                    #   2 → 当前 block 最后一箱，等待下一 block
-                    #   3 → 所有 block 最后一箱，码垛结束
+                    # 返回机器人（固定2块）：
+                    #   第1块float[0:3]：来料配方号box_cfg、箱型box_type、位置码area_cfg；
+                    #   第2块float[0:3]：当前抓箱型的有效L/W/H（mm）。
+                    # box['action']只用于服务端对齐和日志，不在本命令报文中发送；
+                    # 0=普通箱，1=当前面最后一箱，2=当前block最后一箱，
+                    # 3=整个订单最后一箱。真正的结束动作码由cmd_get_path返回。
                     if not rp.boxes:
                         logs.warning("boxes 队列已空，无更多来料配方可发（请重连并重发垛型）")
                         continue
@@ -1986,7 +2093,13 @@ def main():
                         f'来料箱子配方号：{box_cfg}，位置编号：{area_cfg}，'
                         f'尺寸L/W/H：{box_size_cfg}，动作标志：{box["action"]}')
                 elif mes_hex == cmd_get_path:
-                # 单次路径点
+                    # 返回机器人（len(path)+1块，坐标单位mm）：
+                    #   前len(path)块：依次为x0、x1、APP、首个落点及可能的后续落点，
+                    #                   每块携带XYZ；仅首块class_id表示路径校验结果，
+                    #                   0=未启用、1=通过、2=失败，其余路径块class_id=0；
+                    #   最后1块float[0:3]：区域码(p1/p2/p3=1/2/3)、动作码、
+                    #                         本抓第一段箱数。
+                    # 动作码：0=继续，1=本面结束，2=本block结束，3=全部结束。
                     if not rp.robot_offsets:
                         logs.warning("robot_offsets 队列已空，无更多路径可发（请重连并重发垛型）")
                         if chk_session is not None:
@@ -2297,6 +2410,38 @@ def main():
                     #  开始验证
                     path = [x0, x1, x_app, x_goal] + extra_goals
                     if chk_session is not None:
+                        # 手动前置检查额外核对规划器给出的箱体横向范围。这里只
+                        # 报告规划错误，不修改箱数、垛序或正常cmd_get_path流程。
+                        try:
+                            lateral_issue = _check_action_lateral_bounds(
+                                action, rp)
+                            if lateral_issue is not None:
+                                _lateral_text = (
+                                    "垛型车宽越界: "
+                                    f"区域={lateral_issue['area'].upper()}，"
+                                    f"箱体Y=[{lateral_issue['left_y']:.1f},"
+                                    f"{lateral_issue['right_y']:.1f}]mm，"
+                                    f"当前面车宽={lateral_issue['car_width']:.1f}mm，"
+                                    f"{lateral_issue['boundary_name']}="
+                                    f"{lateral_issue['right_wall']:.1f}mm，"
+                                    f"左侧超出={lateral_issue['left_overhang']:.1f}mm，"
+                                    f"右侧超出={lateral_issue['right_overhang']:.1f}mm")
+                                path_issues.append(_lateral_text)
+                                logs.warning(
+                                    f"[CHK-CAR-WIDTH] Block {rp_idx + 1} / "
+                                    f"面 {action['num_F']} / 第 {action['id']} 抓: "
+                                    f"{_lateral_text}")
+                        except Exception as _lateral_error:
+                            _issue = (
+                                "垛型车宽越界检查执行失败: "
+                                f"{type(_lateral_error).__name__}: "
+                                f"{_lateral_error}")
+                            path_issues.append(_issue)
+                            chk_session['system_issues'].append(
+                                f"Block {rp_idx + 1} / 面 {action['num_F']} / "
+                                f"第 {action['id']} 抓: {_issue}")
+                            logs.warning(
+                                f"[CHK-CAR-WIDTH] {_issue}")
                         if rp.block_type == 'mixture' and action['area'] == 'p1':
                             try:
                                 gripper_wall_clearance = \
@@ -2680,6 +2825,9 @@ def main():
                         if chk_value == 0 and chk_session is not None:
                             _finish_chk_runtime(chk_session)
                 elif mes_hex == cmd_stacking:
+                    # 返回机器人（1块）：float[0:3]依次为检测状态、理论宽度(mm)、
+                    # 测量宽度(mm)；状态1=成功，2=采集/计算/程序异常。
+                    # 失败时测量宽度为0；未执行过路径时理论宽度为-1，异常兜底为0。
                     # 双雷达采集 → 堆叠检测 → 发送结果 → 保存点云（分段计时）
                     pc1 = pc2 = None
                     t_collect = t_compute = t_save = 0.0
