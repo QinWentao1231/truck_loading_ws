@@ -100,7 +100,107 @@ def make_bin_env():
     })
 
 
+def make_three_grab_regular_config(box_type='101', block_type='regular'):
+    """构造一层三抓[3,3,4]垛型，用于验证最右抓数量编码。"""
+    base = {
+        'box_list': [box_type],
+        'box': {
+            box_type: {
+                'size': {'L': 455, 'W': 245, 'H': 580},
+                'reserve': {},
+                'grip': {'P1': [4], 'P2': [2], 'P3': [2]},
+            },
+        },
+        'car': {
+            'size': {'L': 9000, 'W': 2900, 'H': 2800},
+            'reserve': {'L': 0, 'W': 0, 'H': 0},
+        },
+        'regular': [],
+        'trapezoid': [],
+        'mixture': [],
+    }
+    stack = [[0] * 11, [0] * 11]
+    group = [[3, 3, 4], [3, 3, 4]]
+    if block_type == 'regular':
+        base['regular'] = [{
+            'N1': 10, 'N2': 0, 'N3': 0,
+            'T12': 1, 'T3': 0, 'F13': 1, 'F2': 0,
+            'E': 0, 'Nx': 0, 'Stack': stack, 'Group': group,
+            'Type': box_type, 'Ishead': False,
+        }]
+    else:
+        base['trapezoid'] = [{
+            'N1': 10, 'N3': 0, 'T1': 1, 'T3': 0, 'Nx': 0,
+            'Stack': stack, 'Group': group,
+            'Isdoor': False, 'Type': box_type, 'Ishead': False,
+        }]
+    return base
+
+
 class MixturePlacementTest(unittest.TestCase):
+
+    def test_regular_three_grab_rightmost_uses_plus_twenty_signal(self):
+        rp = RobotPosition(make_three_grab_regular_config('101'))
+
+        # 三抓执行顺序为左、右、中；右抓实际4箱，因此发送24。
+        self.assertEqual([box['num'] for box in rp.boxes], [3, 24, 3])
+        self.assertEqual(
+            [action['is_p1_three_grab_right_aligned']
+             for action in rp.ori_offsets if action != 'done'],
+            [False, True, False],
+        )
+
+    def test_non_1xx_three_grab_keeps_original_plus_ten_signal(self):
+        rp = RobotPosition(make_three_grab_regular_config('203'))
+
+        self.assertEqual([box['num'] for box in rp.boxes], [13, 14, 13])
+
+    def test_trapezoid_1xx_three_grab_uses_plus_twenty_signal(self):
+        rp = RobotPosition(make_three_grab_regular_config(
+            '101', block_type='trapezoid'))
+
+        self.assertEqual([box['num'] for box in rp.boxes], [3, 24, 3])
+
+    def test_door_trapezoid_1xx_p1_three_grab_uses_plus_twenty_signal(self):
+        cfg = make_three_grab_regular_config(
+            '101', block_type='trapezoid')
+        cfg['trapezoid'][0]['Isdoor'] = True
+        rp = RobotPosition(cfg)
+
+        # 门口梯形走简单分抓[2,4,4]，物理最右抓仍使用右对齐编码。
+        self.assertEqual([box['num'] for box in rp.boxes], [2, 4, 24])
+
+    def test_1xx_p3_three_grab_does_not_use_plus_twenty_signal(self):
+        cfg = make_three_grab_regular_config('101')
+        regular = cfg['regular'][0]
+        regular.update({'N1': 0, 'T12': 0, 'N3': 6, 'T3': 1})
+        rp = RobotPosition(cfg)
+
+        # 1XX 的 P3 原规则为实际数量+10，不得套用 P1 的+20编码。
+        self.assertEqual([box['num'] for box in rp.boxes], [12, 12, 12])
+        self.assertFalse(any(
+            action['is_p1_three_grab_right_aligned']
+            for action in rp.ori_offsets if action != 'done'
+        ))
+
+    def test_mixture_1xx_three_grab_does_not_use_plus_twenty_signal(self):
+        cfg = make_mixture_config()
+        cfg['box_list'] = ['104']
+        cfg['box'] = {'104': cfg['box']['104']}
+        cfg['mixture'][0]['Items'] = [
+            {
+                'Type': '104', 'Num': 3,
+                'Pos': {'X': 20, 'Y': y, 'Z': 0},
+            }
+            for y in (0, 750, 1500)
+        ]
+        rp = RobotPosition(cfg)
+
+        self.assertEqual([box['num'] for box in rp.boxes], [3, 3, 3])
+        self.assertFalse(any(
+            action['is_p1_three_grab_right_aligned']
+            for action in rp.ori_offsets if action != 'done'
+        ))
 
     def test_position_items_are_parsed_as_direct_placements(self):
         rp = RobotPosition(make_mixture_config())
@@ -108,6 +208,7 @@ class MixturePlacementTest(unittest.TestCase):
 
         self.assertEqual(rp.block_type, 'mixture')
         self.assertFalse(rp.is_head)
+        self.assertEqual(rp.frame, {'L': 0.0, 'W': 0.0, 'H': 0.0})
         self.assertEqual(rp.head, {'L': 0.0, 'W': 0.0, 'H': 0.0})
         self.assertEqual(rp.box_count, 8)
         self.assertEqual(len(actions), 2)
@@ -133,6 +234,15 @@ class MixturePlacementTest(unittest.TestCase):
 
         self.assertTrue(rp.is_head)
         self.assertEqual(rp.head, {'L': 1200.0, 'W': 2460.0, 'H': 900.0})
+
+    def test_tail_frame_dimensions_are_preserved(self):
+        cfg = make_mixture_config()
+        cfg['car']['frame'] = {'L': 100, 'W': 2380, 'H': 2550}
+
+        rp = RobotPosition(cfg)
+
+        self.assertEqual(
+            rp.frame, {'L': 100.0, 'W': 2380.0, 'H': 2550.0})
 
     def test_position_item_rejects_num_above_grip_capacity(self):
         cfg = make_mixture_config()

@@ -26,7 +26,7 @@ MENU = """
 ┌──────────────────────────────────────────┐
 │  0. 连接服务端                            │
 │  1. get_pallet    请求垛型总体信息         │
-│  2. get_per_count 请求本面箱数             │
+│  2. get_per_count 请求当前面抓数等信息       │
 │  3. get_box       请求来料配方             │
 │  4. get_path      请求放置路径             │
 │  5. chk_path      手动前置检查             │
@@ -72,7 +72,7 @@ def handle_get_pallet(sock):
     print(
         f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  "
         f"车宽={f0[2]:.0f}mm  head.W={f0[3]:.0f}mm  "
-        f"head.L={f0[4]:.0f}mm"
+        f"head.L={f0[4]:.0f}mm  frame.W={f0[5]:.0f}mm"
     )
     print(f"  箱尺寸 L={f1[0]:.0f} W={f1[1]:.0f} H={f1[2]:.0f}")
     if n >= 3:
@@ -94,8 +94,8 @@ def handle_get_per_count(sock):
     _, blocks = recv_response(sock)
     f = parse_floats(blocks[0], 4)
     print(
-        f"  本面箱数={int(f[0])}  箱型={int(f[1])}  "
-        f"每行抓数={int(f[2])}  角点单侧收缩={f[3]:.1f}mm")
+        f"  本面总抓数={int(f[0])}  当前抓箱型={int(f[1])}  "
+        f"P1底层单行抓数={int(f[2])}  角点单侧收缩={f[3]:.1f}mm")
 
 
 def handle_get_box(sock):

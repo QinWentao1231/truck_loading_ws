@@ -1659,7 +1659,7 @@ def process_point_cloud(pcd, method):
 if __name__ == '__main__':
     file_path = (
         "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
-        "pcd_logs/0714/trun_cloud_20260714_141258.pcd"
+        "pcd_logs/0828/trun_cloud_20260828_153630.pcd"
     )
     pcd = o3d.io.read_point_cloud(file_path)
-    process_point_cloud(pcd, 2)
+    process_point_cloud(pcd, 1)

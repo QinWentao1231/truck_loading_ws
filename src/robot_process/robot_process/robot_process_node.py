@@ -37,7 +37,7 @@ from auxiliary_methods.resume_store import ResumeStore, resolve_resume_dir
 # 当前现场帧格式：start_word(2B)=fefe + fixed(2B)=0000
 #                + action_id(2B)=01xx + reserved(10B)=0。
 cmd_get_pallet    = 'fefe0000010100000000000000000000'  # 请求垛型总体信息
-cmd_get_per_count = 'fefe0000010200000000000000000000'  # 请求当前码垛面箱数
+cmd_get_per_count = 'fefe0000010200000000000000000000'  # 请求当前面抓数、箱型、底层行抓数及角点收缩量
 cmd_get_box       = 'fefe0000010300000000000000000000'  # 请求下一箱来料配方
 cmd_get_path      = 'fefe0000010400000000000000000000'  # 请求下一抓放置路径
 cmd_chk_path      = 'fefe0000010500000000000000000000'  # 独立批量前置检查（返回三位整体状态）
@@ -686,6 +686,8 @@ def _log_special_ind_overview(special_ind, answer=None):
 def _expected_box_signal(action):
     """由 get_path 动作反推 cmd_get_box 应下发的数量编码。"""
     actual_num = int(sum(action['num']))
+    if action.get('is_p1_three_grab_right_aligned'):
+        return actual_num + 20
     box_prefix = str(action.get('box_type', ''))[:1]
     no_turn_signal = (
         box_prefix in ('2', '3')
@@ -1353,9 +1355,15 @@ def parse_planner_json(data: dict):
         car_orig = cond['car']['original']
         car_rsv  = cond['car']['reserve']
         car_head = cond['car'].get('head', {}) or {}
+        car_frame = cond['car'].get('frame', {}) or {}
         car_info = {
             'size':    {'L': car_orig['L'], 'W': car_orig['W'], 'H': car_orig['H']},
             'reserve': {'L': car_rsv['L'],  'W': car_rsv['W'],  'H': car_rsv['H']},
+            'frame': {
+                'L': _json_value(car_frame, 'L', 0.0),
+                'W': _json_value(car_frame, 'W', 0.0),
+                'H': _json_value(car_frame, 'H', 0.0),
+            },
             'head': {
                 'L': _json_value(car_head, 'L', 0.0),
                 'W': _json_value(car_head, 'W', 0.0),
@@ -1480,9 +1488,15 @@ def callback(data):
         car_orig = data.condition.car.original
         car_rsv  = data.condition.car.reserve
         car_head = getattr(data.condition.car, 'head', None)
+        car_frame = getattr(data.condition.car, 'frame', None)
         car_info = {
             'size':    {'L': car_orig.L, 'W': car_orig.W, 'H': car_orig.H},
             'reserve': {'L': car_rsv.L,  'W': car_rsv.W,  'H': car_rsv.H},
+            'frame': {
+                'L': getattr(car_frame, 'L', 0.0),
+                'W': getattr(car_frame, 'W', 0.0),
+                'H': getattr(car_frame, 'H', 0.0),
+            },
             'head': {
                 'L': getattr(car_head, 'L', 0.0),
                 'W': getattr(car_head, 'W', 0.0),
@@ -1972,8 +1986,9 @@ def main():
                     mes_hex = cmd_get_path
                 if mes_hex == cmd_get_pallet:
                     # 返回机器人（固定4块）：
-                    #   第1块float[0:5]：当前block总箱数、面数、车厢宽度、
-                    #                     head.W、head.L（单位均为mm，数量除外）；
+                    #   第1块float[0:6]：当前block总箱数、面数、车厢宽度、
+                    #                     head.W、head.L、尾门门框frame.W
+                    #                     （尺寸单位均为mm，数量除外）；
                     #   第2块float[0:3]：当前block默认箱型的有效L/W/H（mm）；
                     #   第3块float[0:6]：前6个混装block在rp_list中的1起始序号，
                     #                     不存在或不足6个的位置补0；
@@ -2003,7 +2018,7 @@ def main():
                     payload = (
                         _data_block(
                             rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W,
-                            rp.head['W'], rp.head['L'])
+                            rp.head['W'], rp.head['L'], rp.frame['W'])
                         + _data_block(rp.l, rp.w, rp.h)
                         + _data_block(*mixture_position_slots)
                         + _data_block(*head_position_slots)
@@ -2016,15 +2031,26 @@ def main():
                         f'车厢宽度：{round(rp.W, 2)}, '
                         f'异形车头前端宽度：{round(rp.head["W"], 2)}, '
                         f'异形车头长度：{round(rp.head["L"], 2)}, '
+                        f'尾门门框宽度：{round(rp.frame["W"], 2)}, '
                         f'箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}, '
                         f'混装 block 位置：{mixture_block_positions or "无"}, '
                         f'异形车头 block 位置：{head_block_positions or "无"}')
                 elif mes_hex == cmd_get_per_count:
-                    # 返回机器人（1块）：float[0:4]依次为当前面放置次数、当前箱型、
-                    # 底层每行抓数、异形车头角点单侧收缩量（mm，普通区域为0）。
-                    # 当前面及收缩量全部取自本命令正在读取的
-                    # boxes[0]；队列为空时才回退到下一条待执行路径。这样不依赖
-                    # get_path 的 action 处理时序，重复请求也不会累计收缩量。
+                    # 返回机器人（固定1个数据块，未使用的float槽位补0）：
+                    #   第1块float[0]：当前面总放置抓数；统计ori_offsets中与
+                    #                     当前boxes[0].num_F同面的全部P1/P2/P3动作。
+                    #   第1块float[1]：当前待取抓的箱型代号；混装面取
+                    #                     boxes[0].box_type，因此同一面内可随抓变化。
+                    #   第1块float[2]：当前面P1最低层的单行抓数；不是单行箱数，
+                    #                     当前面没有P1动作或来料队列为空时发送1。
+                    #   第1块float[3]：异形车头左右角点各自向内收缩的距离(mm)，
+                    #                     算式为(original.W-当前面有效车宽)/2；
+                    #                     普通区域、超过异形区域或无当前面时发送0。
+                    #   第1块float[4:9]：保留，固定补0。
+                    # 当前面优先取本命令正在读取的boxes[0]；boxes队列为空时，
+                    # 仅角点收缩的面信息回退到下一条未执行路径，而总抓数和
+                    # P1最低层单行抓数按现有兼容规则发送1。重复请求不会推进
+                    # boxes/robot_offsets队列，也不会累计角点收缩量。
                     pallet_cnt = rp.cal_floor_count()
                     _current_face = (
                         rp.boxes[0] if rp.boxes else next(
@@ -2067,9 +2093,8 @@ def main():
                     # 返回机器人（固定2块）：
                     #   第1块float[0:3]：来料配方号box_cfg、箱型box_type、位置码area_cfg；
                     #   第2块float[0:3]：当前抓箱型的有效L/W/H（mm）。
-                    # box['action']只用于服务端对齐和日志，不在本命令报文中发送；
-                    # 0=普通箱，1=当前面最后一箱，2=当前block最后一箱，
-                    # 3=整个订单最后一箱。真正的结束动作码由cmd_get_path返回。
+                    # box_cfg数量编码：非混装1XX-P1三抓行的物理最右抓=实际箱数+20；
+                    # 20x/30x任意区域及10x-P3=实际箱数+10；其余=实际箱数。
                     if not rp.boxes:
                         logs.warning("boxes 队列已空，无更多来料配方可发（请重连并重发垛型）")
                         continue
@@ -2278,13 +2303,18 @@ def main():
                     else:
                         raise Exception('unknown area ! ')
 
-                    # 角点信息引入补正。混装候选轨迹也使用补正后的目标点验证。
+                    # 角点信息只补正最终落箱点；APP 候选的干涉判断不检查该点。
                     x_goal = _candidate_goal(
                         action, rp, config_be, dis_y, action['dir'])
 
-                    # 混装面 APP 候选：连续验证 x0→x1→APP→goal。动态策略任何异常
-                    # 或所有候选均碰撞时，恢复旧 dir/APP，保持原流程继续下发，仅记录日志。
+                    # 混装面 APP 候选：干涉判据与规则垛保持一致，只检查
+                    # x0、x1、x_app 三个过渡/接近点的箱体包围盒，不用最终
+                    # 落箱点淘汰候选。所有候选均失败时保留左右间隙算出的
+                    # 动态 dir 和居中 APP，后续仍由统一路径检查记录实际风险。
                     if mixture_clearance is not None:
+                        dynamic_dir = action['dir']
+                        dynamic_y_offset_app = y_offset_app
+                        dynamic_path = (x0, x1, x_app, size, x_goal)
                         try:
                             raw_candidates = [y_offset_app]
                             raw_candidates.extend(config_be.get(
@@ -2298,8 +2328,13 @@ def main():
 
                             chosen = None
                             last_collision = None
-                            sample_step = float(config_be.get(
-                                'mixture_path_sample_step', 10.0))
+                            candidate_space = None
+                            if obstacles:
+                                candidate_space = SearchSpace(np.array([
+                                    (0, rp.L),
+                                    (0, action_car_width),
+                                    (0, rp.H),
+                                ]), obstacles)
                             for candidate_offset in candidates:
                                 candidate_x0, candidate_x1, candidate_app, candidate_size = \
                                     _build_p1_p3_approach(
@@ -2309,19 +2344,29 @@ def main():
                                 if (candidate_app[1] < 0
                                         or candidate_app[1] + candidate_size[1] >
                                         action_car_width):
+                                    last_collision = {
+                                        'reason': 'app_out_of_car_width',
+                                        'point': candidate_app,
+                                    }
                                     continue
                                 candidate_goal = _candidate_goal(
                                     action, rp, config_be, dis_y, action['dir'])
-                                candidate_path = [
-                                    candidate_x0, candidate_x1,
-                                    candidate_app, candidate_goal,
-                                ]
-                                is_safe, collision = be.trajectory_collision_free(
-                                    candidate_path,
-                                    candidate_size,
-                                    sample_step=sample_step,
-                                )
-                                if is_safe:
+                                candidate_points = [
+                                    candidate_x0, candidate_x1, candidate_app]
+                                collision = None
+                                if candidate_space is not None:
+                                    for point_index, point in enumerate(
+                                            candidate_points):
+                                        if not candidate_space.obstacle_free(
+                                                (point[0], point[1], point[2]),
+                                                candidate_size):
+                                            collision = {
+                                                'reason': 'approach_point_collision',
+                                                'point_index': point_index,
+                                                'point': point,
+                                            }
+                                            break
+                                if collision is None:
                                     chosen = (
                                         candidate_offset, candidate_x0, candidate_x1,
                                         candidate_app, candidate_size, candidate_goal,
@@ -2330,30 +2375,34 @@ def main():
                                 last_collision = collision
 
                             if chosen is None:
-                                raise RuntimeError(
-                                    f"没有无碰撞APP候选，最后碰撞信息={last_collision}")
-
-                            (y_offset_app, x0, x1, x_app,
-                             size, x_goal) = chosen
-                            logs.info(
-                                f"[MIX-APP] Round.{action['id']} 空间邻箱={mixture_clearance['relevant_count']}"
-                                f" left_gap={mixture_clearance['left_gap']:.1f}mm"
-                                f" right_gap={mixture_clearance['right_gap']:.1f}mm"
-                                f" dir={fallback_dir}->{action['dir']}"
-                                f" APP_Y偏移={fallback_y_offset_app:.1f}->{y_offset_app:.1f}mm")
+                                action['dir'] = dynamic_dir
+                                y_offset_app = dynamic_y_offset_app
+                                x0, x1, x_app, size, x_goal = dynamic_path
+                                logs.warning(
+                                    f"[MIX-APP] Round.{action['id']} 所有APP候选均存在"
+                                    f"接近点干涉或越界，保留动态居中结果: "
+                                    f"dir={action['dir']}, "
+                                    f"APP_Y偏移={y_offset_app:.1f}mm, "
+                                    f"最后风险={last_collision}")
+                            else:
+                                (y_offset_app, x0, x1, x_app,
+                                 size, x_goal) = chosen
+                                logs.info(
+                                    f"[MIX-APP] Round.{action['id']} 空间邻箱={mixture_clearance['relevant_count']}"
+                                    f" left_gap={mixture_clearance['left_gap']:.1f}mm"
+                                    f" right_gap={mixture_clearance['right_gap']:.1f}mm"
+                                    f" dir={fallback_dir}->{action['dir']}"
+                                    f" APP_Y偏移={fallback_y_offset_app:.1f}->{y_offset_app:.1f}mm")
                         except Exception as _mix_path_error:
-                            action['dir'] = fallback_dir
-                            y_offset_app = fallback_y_offset_app
-                            x0, x1, x_app, size = _build_p1_p3_approach(
-                                action, rp, config_be, reserve_grip,
-                                y_offset_app, direction=action['dir'])
-                            x_goal = _candidate_goal(
-                                action, rp, config_be, dis_y, action['dir'])
+                            action['dir'] = dynamic_dir
+                            y_offset_app = dynamic_y_offset_app
+                            x0, x1, x_app, size, x_goal = dynamic_path
                             path_issues.append(
-                                f"混装候选轨迹失败，已回退原APP: {_mix_path_error}")
+                                f"混装候选APP筛选异常，已保留动态居中APP: "
+                                f"{_mix_path_error}")
                             logs.warning(
-                                f"[MIX-APP] Round.{action['id']} 候选轨迹规划失败，"
-                                f"保持原APP策略: {_mix_path_error}")
+                                f"[MIX-APP] Round.{action['id']} 候选APP筛选异常，"
+                                f"保留动态居中结果: {_mix_path_error}")
 
                     if _corner_compensation_applies(
                             action, rp, config_be, action['dir']):
@@ -2482,43 +2531,21 @@ def main():
                                 logs.warning(
                                     f"[CHK-GRIP-WALL] Round.{action['id']} "
                                     f"{_issue}")
-                        try:
-                            _continuous_safe, _continuous_detail = \
-                                be.trajectory_collision_free(
-                                    path[:4], size,
-                                    sample_step=float(config_be.get(
-                                        'mixture_path_sample_step', 10.0)))
-                            if not _continuous_safe:
-                                path_issues.append(
-                                    "连续轨迹干涉: "
-                                    f"segment={_continuous_detail['segment']}, "
-                                    f"ratio={_continuous_detail['ratio']:.3f}, "
-                                    f"point={tuple(round(v, 1) for v in _continuous_detail['point'])}")
-                        except Exception as _continuous_error:
-                            _issue = f"连续轨迹检查执行失败: {_continuous_error}"
-                            chk_session['system_issues'].append(
-                                f"Block {rp_idx + 1} / 面 {action['num_F']} / "
-                                f"第 {action['id']} 抓: {_issue}")
-                            logs.warning(_issue)
-                    if config_be['chk_enable']:
-                        logs.info(f"x_goal:{x_goal[0]:.2f}, {x_goal[1]:.2f}, {x_goal[2]:.2f}"
-                                  + (f"  extra_goals({len(extra_goals)}段): " +
-                                     ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
-                                     if extra_goals else ""))
-                        # 混装面物理支撑分析只提示和记录，不阻断路径下发。
-                        # 使用当前抓之前写入 BinEnv 的真实箱体计算接触面积；风险判据
-                        # 是单箱重心未落在直接接触面或至少两个支撑面的联合凸包内。
-                        # 配置中的面积比例目前只随结果输出，供诊断参考，不参与告警。
+                        # 混装物理支撑属于手动前置校验：风险写入本次
+                        # cmd_chk_path 汇总并使“路径”状态位为2，但不参与
+                        # 正式cmd_get_path的path_issues和状态位计算。
                         if rp.block_type == 'mixture' and action['area'] == 'p1':
                             try:
-                                physical_support = be.analyze_mixture_support(action)
+                                physical_support = \
+                                    be.analyze_mixture_support(action)
                                 action['_physical_support'] = physical_support
                                 if physical_support['risk']:
                                     risk_name = (
                                         '完全悬空'
                                         if physical_support['risk_level'] == 'floating'
                                         else '重心未落在联合支撑区')
-                                    risk_boxes = physical_support['risk_box_indices']
+                                    risk_boxes = \
+                                        physical_support['risk_box_indices']
                                     issue_text = (
                                         f"混装物理结构风险({risk_name}): "
                                         f"整抓支撑={physical_support['support_ratio'] * 100:.1f}%，"
@@ -2545,6 +2572,29 @@ def main():
                                 logs.warning(
                                     f"[CHK-SUPPORT] Round.{action['id']} "
                                     f"{issue_text}")
+                        try:
+                            _continuous_safe, _continuous_detail = \
+                                be.trajectory_collision_free(
+                                    path[:4], size,
+                                    sample_step=float(config_be.get(
+                                        'mixture_path_sample_step', 10.0)))
+                            if not _continuous_safe:
+                                path_issues.append(
+                                    "连续轨迹干涉: "
+                                    f"segment={_continuous_detail['segment']}, "
+                                    f"ratio={_continuous_detail['ratio']:.3f}, "
+                                    f"point={tuple(round(v, 1) for v in _continuous_detail['point'])}")
+                        except Exception as _continuous_error:
+                            _issue = f"连续轨迹检查执行失败: {_continuous_error}"
+                            chk_session['system_issues'].append(
+                                f"Block {rp_idx + 1} / 面 {action['num_F']} / "
+                                f"第 {action['id']} 抓: {_issue}")
+                            logs.warning(_issue)
+                    if config_be['chk_enable']:
+                        logs.info(f"x_goal:{x_goal[0]:.2f}, {x_goal[1]:.2f}, {x_goal[2]:.2f}"
+                                  + (f"  extra_goals({len(extra_goals)}段): " +
+                                     ", ".join(f"[{g[0]:.2f},{g[1]:.2f},{g[2]:.2f}]" for g in extra_goals)
+                                     if extra_goals else ""))
                         # 规划器只保证箱体垛型在车厢内；路径抬高和手爪高度包围盒
                         # 由本节点叠加。最终 path（含运动学调整后的 APP）必须重新查顶。
                         for height_issue in _check_path_height(path, size, rp.H):
@@ -2654,6 +2704,25 @@ def main():
                     logs.debug("it cost {:.2f} s".format(end_time - start_time))
 
                     if chk_session is not None:
+                        # 按正常 cmd_get_path 的数据块顺序保存全部路径点。
+                        # 多段放置时，第4点是首段落点，后续点依次为其它段落点。
+                        path_points = []
+                        for point_index, point in enumerate(path, start=1):
+                            if point_index == 1:
+                                point_name = 'x0'
+                            elif point_index == 2:
+                                point_name = 'x1'
+                            elif point_index == 3:
+                                point_name = 'app'
+                            else:
+                                point_name = f'goal_{point_index - 3}'
+                            path_points.append({
+                                'index': point_index,
+                                'name': point_name,
+                                'xyz': [
+                                    round(float(value), 2) for value in point
+                                ],
+                            })
                         chk_result = {
                             'block': rp_idx + 1,
                             'block_type': rp.block_type,
@@ -2668,6 +2737,7 @@ def main():
                             'car_width': round(action_car_width, 2),
                             'app': [round(float(value), 2) for value in x_app],
                             'goal': [round(float(value), 2) for value in x_goal],
+                            'path_points': path_points,
                             'cost_sec': round(end_time - start_time, 4),
                             'issues': list(dict.fromkeys(path_issues)),
                             'physical_support': physical_support,

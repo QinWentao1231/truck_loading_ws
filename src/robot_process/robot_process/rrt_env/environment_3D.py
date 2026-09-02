@@ -256,6 +256,12 @@ class RobotPosition:
         self.W = round(config_data['car']['size']['W'])
         self.H = round(config_data['car']['size']['H'])
         self.RW = round(config_data['car']['reserve']['W'])
+        frame_cfg = config_data['car'].get('frame', {}) or {}
+        self.frame = {
+            'L': float(frame_cfg.get('L', frame_cfg.get('l', 0.0))),
+            'W': float(frame_cfg.get('W', frame_cfg.get('w', 0.0))),
+            'H': float(frame_cfg.get('H', frame_cfg.get('h', 0.0))),
+        }
         head_cfg = config_data['car'].get('head', {}) or {}
         self.head = {
             'L': float(head_cfg.get('L', head_cfg.get('l', 0.0))),
@@ -373,7 +379,9 @@ class RobotPosition:
               box_type=None, box_size=None, box_num_signal=None):
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
-        boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；箱型信号（+10）：
+        boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；数量编码规则：
+          - 非混装面的1XX箱型P1行恰好三抓时，物理最右抓使用实际箱数 +20
+            （优先级高于下面的 +10 规则）
           - 20x / 30x 箱型：任意区域 +10
           - 10x 箱型：仅 P3 区域 +10
         box_num_signal 非空时，boxes 中保留该原始数字供 cmd_get_box 下发。
@@ -399,6 +407,7 @@ class RobotPosition:
         self.robot_offsets.append({
             'id': self._id, 'area': area, 'num': num_list, 'gaps': [], 'num_F': num_F,
             'action': 0, 'dir': dir_, 'pos': pos, 'size': action_box_size,
+            'is_p1_three_grab_right_aligned': False,
             'box_type': action_box_type, 'grab_num_p1': params['grab_p1'],
             'car_width': car_width, 'p1_right_wall': p1_right_wall,
             'head_depth_x': head_depth_x, 'is_head': is_head,
@@ -407,6 +416,7 @@ class RobotPosition:
             'id': self._id, 'area': area, 'num': num_int, 'num_F': num_F,
             'action': 0, 'area_cfg': 0, 'is_tail': is_tail,
             'is_two_grab_row_last': False,
+            'is_p1_three_grab_right_aligned': False,
             'box_type': action_box_type, 'size': action_box_size,
             'car_width': car_width, 'head_depth_x': head_depth_x,
             'is_head': is_head,
@@ -568,7 +578,8 @@ class RobotPosition:
 
         # Group/Stack 当前行恰好两抓时，记录执行顺序中的最后一抓。
         # _finalize 会在原左右位置码上加10，供 cmd_get_box 通知机器人
-        # 这一抓完成当前行。简单行（尾料、Isdoor）不经过本函数，不受影响。
+        # 这一抓完成当前行。该注记仅用于两抓收尾位置码；三抓右对齐数量
+        # 编码在 _finalize 中按整行统一判断，也覆盖尾料和 Isdoor 简单行。
         if n_groups == 2:
             self.boxes[-1]['is_two_grab_row_last'] = True
 
@@ -943,10 +954,34 @@ class RobotPosition:
                     id_to_cfg[oid] = 3
                 else:
                     id_to_cfg[oid] = 2
+
+        # 1XX非混装P1三抓行：不论由Group/Stack还是梯形/尾料简单行
+        # 生成，均按物理Y位置识别最右抓。机器人以“实际箱数+20”切换为
+        # 右对齐抓箱；P2/P3、混装面和2XX/3XX不使用该编码。
+        right_aligned_ids = set()
+        if self.block_type != 'mixture':
+            for offsets in groups.values():
+                if len(offsets) != 3 or offsets[0]['area'] != 'p1':
+                    continue
+                rightmost = max(offsets, key=lambda item: item['pos'][1])
+                if str(rightmost.get('box_type', ''))[:1] != '1':
+                    continue
+                right_aligned_ids.add(int(rightmost['id']))
+                rightmost['is_p1_three_grab_right_aligned'] = True
+
+        actions_by_id = {
+            int(offset['id']): offset for offset in self.robot_offsets
+            if offset != 'done'
+        }
         mixture_cfg = (
             self._mixture_area_cfg_map()
             if self.block_type == 'mixture' else {})
         for box in self.boxes:
+            box_id = int(box['id'])
+            if box_id in right_aligned_ids:
+                action = actions_by_id[box_id]
+                box['num'] = int(sum(action['num'])) + 20
+                box['is_p1_three_grab_right_aligned'] = True
             if self.block_type == 'mixture':
                 box['area_cfg'] = mixture_cfg.get(box['id'], 1)
             elif box.get('is_tail') or box['area'] == 'p3':

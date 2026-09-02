@@ -2695,7 +2695,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260804_/merged_20260804_172652.pcd'
+    _FILENAME = 'merged_20260826_/merged_20260826_161134.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -2724,19 +2724,19 @@ if __name__ == '__main__':
     # 细支箱离线回放使用与 robot_process_node 相同的补偿角：-56.6 - (-60.5) = +3.9°。
     measured = _compute_width(
         pcd, empty,
-        yaw_offset_deg=3.9,
+        yaw_offset_deg=7.4,
         view=True,
-        rel_top_h=0.3,
-        box_h=0.3,
-        expected_width_mm=825,
-        box_width_mm=275,
-        box_type=201,
-        target_y_mm=727.5,
-        car_width_mm=2830,
+        rel_top_h=0.585,
+        box_h=0.585,
+        expected_width_mm=750,
+        box_width_mm=250,
+        box_type=103,
+        target_y_mm=698.55,
+        car_width_mm=2459,
         stair_step_mode=False,
-        detection_width_mm=1091.25,
-        detection_target_y_mm=638.75,
-    )
+        detection_width_mm=885.85,
+        detection_target_y_mm=573.15,
+    )  # 离线回放显式开启可视化
     if measured is None:
         print('\n检测状态: status=2（倾斜异常或宽度计算失败）')
     else:
