@@ -788,7 +788,7 @@ def _process_point_cloud_impl(pcd, method):
     
     start_time = time.time()
     global view
-    view =  True
+    view =  False
     debug = view
     view_normal = False
     if view or view_normal:
