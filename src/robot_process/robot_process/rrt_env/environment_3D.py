@@ -13,6 +13,12 @@ from collections import defaultdict
 _logger = logging.getLogger(__name__)
 
 
+# 异形车头宽度按各面累计纵深线性插值；仅异形车头面在箱体
+# 物理长度外固定保留15mm面间余量，普通面不加。该余量不改变箱体尺寸。
+HEAD_FACE_DEPTH_MARGIN_MM = 15.0
+DOOR_FACE_MIN_RIGHT_CLEARANCE_MM = 100.0
+
+
 def _mixture_items(mixture_face):
     """返回 Mixture 的放置信息列表。"""
     return mixture_face.get('Items', mixture_face.get('items', []))
@@ -128,7 +134,8 @@ def _attach_head_face_geometry(blocks):
     """为完整订单的每个面附加异形车头几何信息。
 
     block/面按规划顺序视为从车头向车尾排列。第一个面从纵深0开始，下一面
-    起点由上一面真实占用纵深推进。``CarCondition.head`` 有效时，未显式标记
+    起点由上一面推进：异形车头面使用“箱长+15mm”，普通面仅使用
+    箱长。``CarCondition.head`` 有效时，未显式标记
     Ishead 的前部面也按累计纵深自动识别；Regular/Mixture/Trapezoid 下的
     Ishead 则作为显式标记。宽度取当前面靠车头一侧的最窄值。
     """
@@ -168,10 +175,13 @@ def _attach_head_face_geometry(blocks):
     for block, specs in zip(blocks, block_specs):
         geometry = {}
         for face_number, spec in enumerate(specs, start=1):
+            box_depth = float(spec['depth'])
             inferred = (
                 has_head_geometry and depth_x < head_length - 1e-6)
             explicit = bool(spec['explicit_is_head'])
             is_head = explicit or inferred
+            depth_margin = HEAD_FACE_DEPTH_MARGIN_MM if is_head else 0.0
+            face_depth = box_depth + depth_margin
             if is_head and has_head_geometry:
                 ratio = min(max(depth_x / head_length, 0.0), 1.0)
                 car_width = head_width + (
@@ -180,7 +190,9 @@ def _attach_head_face_geometry(blocks):
                 car_width = body_width
             geometry[face_number] = {
                 'depth_x': depth_x,
-                'face_depth': float(spec['depth']),
+                'box_depth': box_depth,
+                'depth_margin': depth_margin,
+                'face_depth': face_depth,
                 'car_width': float(car_width),
                 'is_head': bool(is_head),
                 'explicit_is_head': explicit,
@@ -190,16 +202,20 @@ def _attach_head_face_geometry(blocks):
                     else 'depth' if inferred
                     else 'normal'),
             }
-            depth_x += float(spec['depth'])
+            depth_x += face_depth
         block['_head_face_geometry'] = geometry
 
 
-def build_robot_positions(config_data):
-    """按完整订单构造 RobotPosition 列表，并跨 block 连续计算异形宽度。"""
+def build_robot_positions(config_data, *, conveyor_left_transfer_enable=True):
+    """构造完整订单，共用输送线左移栽开关并跨block连续计算异形宽度。"""
     blocks = config_data if isinstance(config_data, list) else [config_data]
     prepared = copy.deepcopy(blocks)
     _attach_head_face_geometry(prepared)
-    return [RobotPosition(block) for block in prepared]
+    return [
+        RobotPosition(
+            block, conveyor_left_transfer_enable=conveyor_left_transfer_enable)
+        for block in prepared
+    ]
 
 
 class Box:
@@ -229,8 +245,12 @@ class RobotPosition:
     """单个 block 的垛型解析器。block 类型互斥：regular / trapezoid / mixture，
     仅对应字段会被读取和解析。"""
 
-    def __init__(self, config_data):
+    def __init__(self, config_data, *, conveyor_left_transfer_enable=True):
         """读取单个 block 配置并立即生成完整的逐抓队列。"""
+        if not isinstance(conveyor_left_transfer_enable, bool):
+            raise ValueError('conveyor_left_transfer_enable 必须为 true/false')
+        # 仅控制输送线来料数量+20编码，不改变抓取顺序、位置或原有+10规则。
+        self.conveyor_left_transfer_enable = conveyor_left_transfer_enable
         # 单独构造 RobotPosition（测试/离线工具）时也生成面级信息；正式主流程
         # 使用 build_robot_positions 一次处理完整订单，保证纵深跨 block 连续。
         if '_head_face_geometry' not in config_data:
@@ -327,6 +347,7 @@ class RobotPosition:
         self.paths = []
         self._id = 0
         self._face_p1_right_walls = {}
+        self.door_face_layouts = []
 
         self.read_robot_offset()
 
@@ -380,7 +401,8 @@ class RobotPosition:
         """向 robot_offsets 和 boxes 同步追加一条动作记录。
         robot_offsets 中 num 存列表形式（方便机器人侧按段读取），
         boxes 中 num 存整数，并保存当前抓的箱型和有效尺寸；数量编码规则：
-          - 非混装面的1XX箱型P1行恰好三抓时，物理最右抓使用实际箱数 +20
+          - 输送线左移栽开启，且非混装、非尾门的1XX-P1行恰好9箱三抓时，
+            物理最右抓使用实际箱数 +20
             （优先级高于下面的 +10 规则）
           - 20x / 30x 箱型：任意区域 +10
           - 10x 箱型：仅 P3 区域 +10
@@ -400,6 +422,9 @@ class RobotPosition:
             num_int = int(box_num_signal)
         face_geometry = self.head_face_geometry.get(int(num_F), {})
         car_width = float(face_geometry.get('car_width', self.W))
+        head_wall_y_offset = (
+            max(0.0, (float(self.W) - car_width) * 0.5)
+            if bool(face_geometry.get('is_head', False)) else 0.0)
         p1_right_wall = float(
             self._face_p1_right_walls.get(int(num_F), car_width))
         head_depth_x = float(face_geometry.get('depth_x', 0.0))
@@ -410,6 +435,8 @@ class RobotPosition:
             'is_p1_three_grab_right_aligned': False,
             'box_type': action_box_type, 'grab_num_p1': params['grab_p1'],
             'car_width': car_width, 'p1_right_wall': p1_right_wall,
+            'original_car_width': float(self.W),
+            'head_wall_y_offset': head_wall_y_offset,
             'head_depth_x': head_depth_x, 'is_head': is_head,
         })
         self.boxes.append({
@@ -419,6 +446,8 @@ class RobotPosition:
             'is_p1_three_grab_right_aligned': False,
             'box_type': action_box_type, 'size': action_box_size,
             'car_width': car_width, 'head_depth_x': head_depth_x,
+            'original_car_width': float(self.W),
+            'head_wall_y_offset': head_wall_y_offset,
             'is_head': is_head,
         })
 
@@ -579,7 +608,7 @@ class RobotPosition:
         # Group/Stack 当前行恰好两抓时，记录执行顺序中的最后一抓。
         # _finalize 会在原左右位置码上加10，供 cmd_get_box 通知机器人
         # 这一抓完成当前行。该注记仅用于两抓收尾位置码；三抓右对齐数量
-        # 编码在 _finalize 中按整行统一判断，也覆盖尾料和 Isdoor 简单行。
+        # 编码在 _finalize 中按整行统一判断，覆盖非尾门尾料，排除 Isdoor 区域。
         if n_groups == 2:
             self.boxes[-1]['is_two_grab_row_last'] = True
 
@@ -600,6 +629,143 @@ class RobotPosition:
         for num in self._split_grabs(N3, self.grab_num_p3):
             self._emit('p3', num, num_F, 1, [0, y_start + cum * self.h, z])
             cum += num
+
+    def _tail_door_width(self):
+        """返回尾门开口有效宽度；订单未配置时兼容回退车厢宽度。"""
+        frame_width = float(self.frame.get('W', 0.0))
+        if math.isfinite(frame_width) and frame_width > 0:
+            return min(frame_width, float(self.W))
+        _logger.warning(
+            f"尾门宽度未配置或无效（frame.W={frame_width}），"
+            f"回退车厢宽度 {self.W:.1f}mm")
+        return float(self.W)
+
+    @staticmethod
+    def _action_right_edge_y(action):
+        """返回一抓箱体（包含抓内缝隙）的Y向右边界。"""
+        y_start = float(action['pos'][1])
+        actual_num = sum(int(value) for value in action['num'])
+        if action['area'] == 'p1':
+            return (
+                y_start
+                + actual_num * float(action['size'][1])
+                + sum(float(value) for value in action.get('gaps', []))
+            )
+        if action['area'] == 'p3':
+            return y_start + actual_num * float(action['size'][2])
+        return y_start + float(action['size'][1])
+
+    def _center_tail_door_face(self, num_F, emitted_start, door_width):
+        """仅调整梯形垛Isdoor=true尾门面，并保证右侧至少预留100mm。
+
+        可用余量足够时，先从尾门剩余宽度中固定扣除右侧安全余量，
+        再将其余空间左右均分：a=(尾门宽-整面宽-100)/2。
+        """
+        actions = [
+            action for action in self.robot_offsets[emitted_start:]
+            if action != 'done' and int(action['num_F']) == int(num_F)
+        ]
+        if not actions:
+            raise ValueError(f"尾门面{num_F}没有生成码垛动作")
+
+        face_left = min(float(action['pos'][1]) for action in actions)
+        face_right = max(
+            self._action_right_edge_y(action) for action in actions)
+        face_width = face_right - face_left
+        free_width = float(door_width) - face_width
+        if free_width < DOOR_FACE_MIN_RIGHT_CLEARANCE_MM - 1e-6:
+            action_ids = set()
+            for action in actions:
+                action['is_door'] = True
+                action['door_width'] = float(door_width)
+                action['door_face_width'] = face_width
+                action['door_y_offset'] = 0.0
+                action_ids.add(int(action['id']))
+            for box in self.boxes:
+                if int(box['id']) in action_ids:
+                    box['is_door'] = True
+                    box['door_width'] = float(door_width)
+                    box['door_face_width'] = face_width
+                    box['door_y_offset'] = 0.0
+
+            right_clearance = float(door_width) - face_right
+            self.door_face_layouts.append({
+                'face': int(num_F),
+                'door_width': float(door_width),
+                'face_width': face_width,
+                'centered_offset': free_width * 0.5,
+                'formula_offset': (
+                    free_width - DOOR_FACE_MIN_RIGHT_CLEARANCE_MM) * 0.5,
+                'applied_offset': 0.0,
+                'shifted_left': face_left,
+                'shifted_right': face_right,
+                'left_clearance': face_left,
+                'right_clearance': right_clearance,
+                'min_right_clearance': DOOR_FACE_MIN_RIGHT_CLEARANCE_MM,
+                'position_changed': False,
+                'decision': '剩余宽度不足100mm，保持原始Y位置',
+            })
+            _logger.info(
+                f"Isdoor=true尾门面{num_F}剩余宽度不足："
+                f"尾门宽={door_width:.1f}mm，整面宽={face_width:.1f}mm，"
+                f"剩余={free_width:.1f}mm；仅记录日志，保持原始Y位置")
+            return
+
+        centered_left = free_width * 0.5
+        max_left_for_right_clearance = (
+            free_width - DOOR_FACE_MIN_RIGHT_CLEARANCE_MM)
+        formula_offset = max_left_for_right_clearance * 0.5
+        # 公式本身在free_width>=100时必然满足右侧余量要求；仍通过
+        # max_left_for_right_clearance做边界保护，避免浮点误差破坏安全余量。
+        target_left = max(
+            0.0, min(formula_offset, max_left_for_right_clearance))
+        y_offset = target_left - face_left
+        right_clearance = free_width - target_left
+        shifted_left = face_left + y_offset
+        shifted_right = face_right + y_offset
+
+        action_ids = set()
+        for action in actions:
+            action['pos'][1] = float(action['pos'][1]) + y_offset
+            action['is_door'] = True
+            action['door_width'] = float(door_width)
+            action['door_face_width'] = face_width
+            action['door_y_offset'] = y_offset
+            action_ids.add(int(action['id']))
+        for box in self.boxes:
+            if int(box['id']) in action_ids:
+                box['is_door'] = True
+                box['door_width'] = float(door_width)
+                box['door_face_width'] = face_width
+                box['door_y_offset'] = y_offset
+
+        self.door_face_layouts.append({
+            'face': int(num_F),
+            'door_width': float(door_width),
+            'face_width': face_width,
+            'centered_offset': centered_left,
+            'formula_offset': formula_offset,
+            'applied_offset': y_offset,
+            'shifted_left': shifted_left,
+            'shifted_right': shifted_right,
+            'left_clearance': shifted_left,
+            'right_clearance': right_clearance,
+            'min_right_clearance': DOOR_FACE_MIN_RIGHT_CLEARANCE_MM,
+            'position_changed': abs(y_offset) > 1e-6,
+            'decision': '扣除右侧100mm后，将剩余宽度左右均分',
+        })
+
+        _logger.info(
+            f"Isdoor=true尾门面{num_F}触发整体Y偏移："
+            f"尾门宽={door_width:.1f}mm，"
+            f"整面宽={face_width:.1f}mm，"
+            f"计算偏移=({door_width:.1f}-{face_width:.1f}-"
+            f"{DOOR_FACE_MIN_RIGHT_CLEARANCE_MM:.1f})/2="
+            f"{formula_offset:.1f}mm，"
+            f"实际偏移={y_offset:.1f}mm，"
+            f"最终Y=[{shifted_left:.1f}, {shifted_right:.1f}]mm，"
+            f"左侧余量={shifted_left:.1f}mm，"
+            f"右侧余量={right_clearance:.1f}mm")
 
     # ── 入口与分派 ─────────────────────────────────────────────
 
@@ -718,10 +884,15 @@ class RobotPosition:
         for f, trap in enumerate(self.trapezoid):
             num_F_trap = f + 1
             face_width = self.face_car_width(num_F_trap)
-            self._face_p1_right_walls[num_F_trap] = face_width
+            # 只有梯形条目明确给出Isdoor=true才执行尾门整面Y偏移；
+            # 普通梯形面、常规垛尾料面和混装面均不进入该逻辑。
+            is_door = bool(trap['Isdoor'])
+            door_width = self._tail_door_width() if is_door else face_width
+            self._face_p1_right_walls[num_F_trap] = door_width
+            emitted_start = len(self.robot_offsets)
             # 梯形 P1
             for t in range(trap['T1']):
-                if trap['Isdoor']:
+                if is_door:
                     # 门口区：简单顺序放置，无间隙分组；用 tail 分批规则确保顺序为升序（小→大）
                     self._emit_p1_simple(trap['N1'], self.grab_num_p1, t * self.h, num_F_trap, tail=True)
                 else:
@@ -747,6 +918,9 @@ class RobotPosition:
                         f"（面序={f}），超出 {trap['Nx'] - N_cap} 个丢弃")
                 self._emit_p1_simple(
                     Nx_, self.grab_num_p1, z_tail, num_F_trap, tail=True)
+            if is_door:
+                self._center_tail_door_face(
+                    num_F_trap, emitted_start, door_width)
             self.robot_offsets[-1]['action'] = 1
             self.boxes[-1]['action'] = 1
 
@@ -955,13 +1129,25 @@ class RobotPosition:
                 else:
                     id_to_cfg[oid] = 2
 
-        # 1XX非混装P1三抓行：不论由Group/Stack还是梯形/尾料简单行
-        # 生成，均按物理Y位置识别最右抓。机器人以“实际箱数+20”切换为
-        # 右对齐抓箱；P2/P3、混装面和2XX/3XX不使用该编码。
+        # 输送线左移栽开启后，1XX非混装、非尾门P1行恰好9箱三抓时，按物理Y位置
+        # 识别最右抓。机器人以“实际箱数+20”切换为右对齐抓箱；10箱
+        # 三抓行以及P2/P3、混装面和2XX/3XX不使用该编码。
+        # Isdoor按梯形面序单独排除，不能用is_tail排除普通区域的尾料。
+        door_faces = {
+            face_number
+            for face_number, trap in enumerate(self.trapezoid, start=1)
+            if trap.get('Isdoor', False)
+        }
         right_aligned_ids = set()
-        if self.block_type != 'mixture':
+        if self.conveyor_left_transfer_enable and self.block_type != 'mixture':
             for offsets in groups.values():
                 if len(offsets) != 3 or offsets[0]['area'] != 'p1':
+                    continue
+                if offsets[0]['num_F'] in door_faces:
+                    continue
+                row_box_count = sum(
+                    int(sum(offset['num'])) for offset in offsets)
+                if row_box_count != 9:
                     continue
                 rightmost = max(offsets, key=lambda item: item['pos'][1])
                 if str(rightmost.get('box_type', ''))[:1] != '1':

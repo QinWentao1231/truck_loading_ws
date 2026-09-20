@@ -129,6 +129,12 @@ def _show_front_gap_diagnostics(
     geometries.append(_make_xz_rectangle(
         float(target_range['left']), float(target_range['right']),
         y_value, z_min, z_max, [1.00, 0.85, 0.10]))
+    check_region = _resolve_pair_occupancy_region(
+        target_range['left'], target_range['right'], z_min, z_max)
+    if check_region is not None:
+        geometries.append(_make_xz_rectangle(
+            check_region['x_min'], check_region['x_max'], y_value + 0.01,
+            check_region['z_min'], check_region['z_max'], [1.00, 0.40, 0.00]))
 
     for candidate in front_candidates:
         edge_x = float(candidate['x_face'])
@@ -142,6 +148,10 @@ def _show_front_gap_diagnostics(
         gap_points = front_gap_pts[
             (front_gap_pts[:, 0] >= gap_left) &
             (front_gap_pts[:, 0] <= gap_right)]
+        if check_region is not None:
+            gap_points = gap_points[
+                (gap_points[:, 2] >= check_region['z_min']) &
+                (gap_points[:, 2] <= check_region['z_max'])]
         if len(gap_points):
             gap_cloud = o3d.geometry.PointCloud()
             gap_cloud.points = o3d.utility.Vector3dVector(gap_points)
@@ -158,7 +168,7 @@ def _show_front_gap_diagnostics(
 
     title = (
         "正面缺口诊断：灰=当前层 蓝=正面薄层 黄=订单范围 "
-        "紫=突变边界 绿=箱侧窗口 红=缺口侧残点")
+        "橙=自适应检查区 紫=突变边界 绿=箱侧窗口 红=检查区残点")
     return _show_geometries(title, geometries, width=1100, height=750)
 
 
@@ -199,7 +209,15 @@ PAIR_OCCUPANCY_MIN_COVERAGE = 0.60  # 连续箱体覆盖的主判定阈值
 PAIR_OCCUPANCY_MIN_PARTIAL_COVERAGE = 0.30  # 有完整箱体参照时允许识别部分覆盖
 PAIR_OCCUPANCY_MIN_REL_DENSITY = 0.25  # 占用区密度至少达到本帧最完整箱体区的25%
 PAIR_OCCUPANCY_Z_BIN_M = 0.10       # 阶梯缺口按高度每100mm统计一行
-PAIR_OCCUPANCY_UPPER_FRACTION = 0.50 # 阶梯缺口只用目标箱高上半部决定是否已占用
+# 阶梯检查区按缺口宽高比自适应：只留底部小容差，不再忽略整个下半层。
+PAIR_OCCUPANCY_BOTTOM_HEIGHT_RATIO = 0.20  # 底部避让最多为当前检测层高度的20%
+PAIR_OCCUPANCY_BOTTOM_WIDTH_RATIO = 0.50   # 宽度限制为50%W，仍受20%H和80mm上限约束
+PAIR_OCCUPANCY_BOTTOM_MAX_M = 0.08         # 底部额外避让绝对上限80mm
+PAIR_OCCUPANCY_WINDOW_HEIGHT_RATIO = 0.50 # 局部复核窗口不超过检测层高度的50%
+PAIR_OCCUPANCY_WINDOW_WIDTH_RATIO = 0.25  # 窗口高度随缺口宽度调整
+PAIR_OCCUPANCY_WINDOW_MIN_M = 0.08         # 通常至少检查连续80mm高度
+PAIR_OCCUPANCY_WINDOW_ZSPAN_RATIO = 0.40  # 局部箱面须具有足够真实高度跨度
+PAIR_OCCUPANCY_WINDOW_ZSPAN_MAX_M = 0.06  # 连续60mm高度已可作为局部箱体证据
 PAIR_WIDTH_TOLERANCE_BOXES = 1.5     # 候选面允许间距 = 检测参考宽度 ± 1.5个单箱宽度
 
 # ── 所有垛面共用的订单位置引导 ──
@@ -207,14 +225,33 @@ ORDER_WALL_SPAN_TOLERANCE_M = 0.40   # 检出左右车壁间距与订单车宽�
 ORDER_TARGET_EDGE_MATCH_M = 0.18     # 实测候选面距订单换算边界180mm内视为同一边界
 ORDER_TARGET_PAIR_EDGE_M = 0.25      # 订单引导时，候选对每侧最多偏离目标边界250mm
 ORDER_TARGET_EDGE_MIN_PTS = 20       # 实测边界至少20点，弱小簇不能覆盖订单虚拟边界
-ORDER_TARGET_EDGE_MIN_ZSPAN_RATIO = 0.40  # 实测边界高度至少覆盖当前检测层的40%
-ORDER_TARGET_EDGE_MIN_ZSPAN_M = 0.10     # 矮箱当前层也至少保留100mm垂直跨度
-ORDER_TARGET_EDGE_MAX_ZSPAN_M = 0.25     # 高箱不强制超过250mm，避免过严漏掉有效侧面
+# 侧面已通过聚类基础过滤，不再追加“覆盖当前层40%高度”的门槛。
 
-# ── 混装/阶梯缺口的正面点云突变边界 ──
-# 侧面回波容易因观察角度/遮挡而缺失；目标位置已由订单和车壁限定后，再检查
-# 当前层上半部的正面薄层点云是否存在稳定的“有点↔空白”突变。检出后把它作为
-# 实测边界参与配对，只有正面突变也不存在时才继续使用纯订单虚拟边界。
+# ── 独立车壁标定 ──
+# 缺口测宽只使用当前面、当前层的小窗口；车壁定位则必须利用全深度、全高度的大面，
+# 否则首层靠近地板/加强筋时，整面车壁会被裁成几十个点的小簇。
+WALL_VOXEL_M = 0.025                 # 全局车壁先25mm降采样，控制法向和聚类耗时
+WALL_NORMAL_RADIUS_M = 0.10          # 全局大面法向搜索半径
+WALL_NORMAL_MAX_NN = 40
+WALL_NORMAL_ANGLE_DEG = 30           # 兼容波纹板、加强筋造成的局部法向起伏
+WALL_DBSCAN_EPS_M = 0.18
+WALL_DBSCAN_MIN_POINTS = 10
+WALL_MIN_POINTS = 100                # 降采样后的最低点数
+WALL_MIN_Y_SPAN_M = 0.65             # 强车壁沿车长方向至少连续65cm
+WALL_REFERENCE_MIN_Y_SPAN_M = 0.35   # 上一面参考只可引导重拟合当前弱车壁
+WALL_MIN_Z_SPAN_M = 0.80             # 车壁须跨越多层高度，排除当前层箱侧
+WALL_ONE_SIDE_MIN_ABS_X_M = 0.80     # 单壁推算只接受明显位于车厢外侧的强大面
+WALL_CACHE_WIDTH_TOLERANCE_MM = 50.0 # 同一面内按相近有效车宽匹配车壁缓存
+WALL_REFERENCE_X_TOLERANCE_M = 0.18  # 上一面坐标附近18cm内寻找当前帧车壁点
+
+_wall_pair_cache = {}
+_previous_wall_pair_cache = {}
+_active_wall_face_key = None
+
+# ── 缺口的正面点云突变边界 ──
+# 现场正面点云受高层稀疏、遮挡和箱面起伏影响较大。目标位置由订单和车壁限定后，
+# 仍优先采用法向聚类得到的可靠实测侧面；目标某侧缺失或只有弱候选时，才从当前层
+# 宽高比自适应检查区内正面薄层的“有点↔空白”突变补齐该侧边界。
 FRONT_GAP_EDGE_SEARCH_M = 0.18       # 仅在订单边界±180mm内寻找，防止吸附到相邻箱缝
 FRONT_GAP_EDGE_BIN_M = 0.02          # X方向20mm分箱，兼顾边界精度和高层稀疏点云
 FRONT_GAP_EDGE_WINDOW_M = 0.10       # 边界内外各检查100mm连续区域
@@ -224,7 +261,15 @@ FRONT_GAP_EDGE_MAX_GAP_COVERAGE = 0.20  # 缺口一侧最多20%的bin有点
 FRONT_GAP_EDGE_MIN_DENSITY_RATIO = 4.0  # 箱侧点密度至少为缺口侧4倍
 FRONT_GAP_EDGE_MIN_BOX_PTS = 20      # 箱侧窗口至少20点，拒绝零星噪声突变
 FRONT_GAP_EDGE_MIN_ZSPAN_RATIO = 0.30  # 正面边界高度至少覆盖当前层30%
+FRONT_GAP_EDGE_MIN_ZSPAN_M = 0.10      # 正面突变仍需至少100mm高度，避免薄片误补边
 FRONT_GAP_EDGE_MAX_ZSPAN_M = 0.20      # 高箱正面边界达到200mm即可，侧面缺失时不过严
+FRONT_GAP_EDGE_Z_BIN_M = 0.02          # X-Z支持统计的高度分箱20mm
+FRONT_GAP_EDGE_MIN_Z_BINS = 3          # 每个箱面X分箱至少由3个高度分箱共同支持
+FRONT_GAP_EDGE_MIN_RUN_BINS = 3        # 边界后须紧邻至少3个连续有支持的X分箱
+# 侧面测宽已进入机器人减速/停止区间时，强制用正面突变边界交叉复核。
+# 机器人约定：余量 <50mm 停止，50~70mm 减速。
+SIDE_WIDTH_FRONT_RECHECK_MARGIN_MM = 70.0
+SIDE_WIDTH_STOP_MARGIN_MM = 50.0
 
 # ── 当前面 Y 锁定（深度方向，只保留最靠雷达的当前面箱，滤掉后排箱）──
 FRONT_Y_BIN = 0.05               # Y 直方图 bin 宽(米)
@@ -660,6 +705,296 @@ def _derotate_about_j1(pts, angle_deg, axis_xy):
     out[:, 0] = x * c - y * s + ax
     out[:, 1] = x * s + y * c + ay
     return out
+
+
+def reset_wall_cache():
+    """清空当前订单的车壁标定状态。
+
+    主节点每次开始处理新订单时调用，避免相同车宽的下一辆车复用上一辆车的
+    点云坐标。离线批量回放跨订单时也应在订单边界调用。
+    """
+    global _active_wall_face_key
+    _wall_pair_cache.clear()
+    _previous_wall_pair_cache.clear()
+    _active_wall_face_key = None
+
+
+def activate_wall_face(face_key):
+    """切换车壁标定所属的码垛面。
+
+    进入新面时，当前面缓存会转为仅用于寻找当前帧弱车壁的参考，不会
+    被直接当作新面坐标。返回 True 表示确实发生了面切换。
+    """
+    global _active_wall_face_key
+    if face_key is None:
+        return False
+    normalized_key = tuple(face_key) if isinstance(face_key, list) else face_key
+    if normalized_key == _active_wall_face_key:
+        return False
+    _previous_wall_pair_cache.clear()
+    _previous_wall_pair_cache.update(
+        {width: dict(pair) for width, pair in _wall_pair_cache.items()})
+    _wall_pair_cache.clear()
+    _active_wall_face_key = normalized_key
+    return True
+
+
+def _select_global_wall_pair(candidates, car_width_mm):
+    """从全局大面候选中选择跨度最接近订单车宽的一对实测车壁。"""
+    if (car_width_mm is None or not np.isfinite(car_width_mm) or
+            float(car_width_mm) <= 0):
+        return None
+    expected_span = float(car_width_mm) / 1000.0
+    best = None
+    ordered = sorted(
+        (
+            item for item in candidates
+            if float(item['y_span']) >= WALL_MIN_Y_SPAN_M
+        ),
+        key=lambda item: item['x_face'])
+    for left_index, left in enumerate(ordered):
+        for right in ordered[left_index + 1:]:
+            span = float(right['x_face']) - float(left['x_face'])
+            error = abs(span - expected_span)
+            score = (
+                error,
+                -min(float(left['y_span']), float(right['y_span'])),
+                -min(float(left['z_span']), float(right['z_span'])),
+                -(int(left['points']) + int(right['points'])),
+            )
+            if best is None or score < best['score']:
+                best = {
+                    'score': score,
+                    'left_candidate': left,
+                    'right_candidate': right,
+                    'left': float(left['x_face']),
+                    'right': float(right['x_face']),
+                    'span': span,
+                    'wall_error': error,
+                    'source': 'global_measured',
+                }
+    if best is None or best['wall_error'] > ORDER_WALL_SPAN_TOLERANCE_M:
+        return None
+    return best
+
+
+def _extract_global_wall_candidates(pts):
+    """提取跨越多层的车壁大面及可供历史参考重拟合的弱大面。"""
+    roi_mask = (
+        (pts[:, 0] >= PASS_X[0]) & (pts[:, 0] <= PASS_X[1]) &
+        (pts[:, 1] >= PASS_Y[0]) & (pts[:, 1] <= PASS_Y[1]) &
+        (pts[:, 2] >= PASS_Z[0]) & (pts[:, 2] <= PASS_Z[1])
+    )
+    roi = pts[roi_mask]
+    if len(roi) < WALL_MIN_POINTS:
+        return []
+
+    cloud = o3d.geometry.PointCloud()
+    cloud.points = o3d.utility.Vector3dVector(roi)
+    cloud = cloud.voxel_down_sample(WALL_VOXEL_M)
+    if len(cloud.points) < WALL_MIN_POINTS:
+        return []
+    cloud.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(
+            radius=WALL_NORMAL_RADIUS_M,
+            max_nn=WALL_NORMAL_MAX_NN))
+    sampled = np.asarray(cloud.points)
+    normals = np.asarray(cloud.normals)
+    side_points = sampled[
+        np.abs(normals[:, 0]) >
+        np.cos(np.radians(WALL_NORMAL_ANGLE_DEG))]
+    if len(side_points) < WALL_DBSCAN_MIN_POINTS:
+        return []
+
+    side_cloud = o3d.geometry.PointCloud()
+    side_cloud.points = o3d.utility.Vector3dVector(side_points)
+    labels = np.asarray(side_cloud.cluster_dbscan(
+        eps=WALL_DBSCAN_EPS_M,
+        min_points=WALL_DBSCAN_MIN_POINTS,
+        print_progress=False))
+    candidates = []
+    cluster_count = int(labels.max()) + 1 if len(labels) else 0
+    for cluster_id in range(cluster_count):
+        cluster = side_points[labels == cluster_id]
+        if len(cluster) < WALL_MIN_POINTS:
+            continue
+        y_span = float(np.ptp(cluster[:, 1]))
+        z_span = float(np.ptp(cluster[:, 2]))
+        if (y_span < WALL_REFERENCE_MIN_Y_SPAN_M or
+                z_span < WALL_MIN_Z_SPAN_M):
+            continue
+        candidates.append({
+            'k': f'global_wall_{cluster_id}',
+            'x_face': float(np.median(cluster[:, 0])),
+            'pts': cluster,
+            'points': int(len(cluster)),
+            'y_span': y_span,
+            'z_span': z_span,
+        })
+    return candidates
+
+
+def _find_wall_pair_cache(cache, car_width_mm, source):
+    """按相近有效车宽查找指定的车壁坐标缓存。"""
+    if car_width_mm is None or not np.isfinite(car_width_mm):
+        return None
+    for cached_width, cached in cache.items():
+        if abs(float(cached_width) - float(car_width_mm)) <= \
+                WALL_CACHE_WIDTH_TOLERANCE_MM:
+            result = dict(cached)
+            result['source'] = source
+            return result
+    return None
+
+
+def _cached_wall_pair(car_width_mm):
+    """读取当前码垛面内的车壁坐标缓存。"""
+    return _find_wall_pair_cache(
+        _wall_pair_cache, car_width_mm, 'current_face_cache')
+
+
+def _previous_wall_pair(car_width_mm):
+    """读取上一码垛面参考；返回值不能直接作为当前面坐标。"""
+    return _find_wall_pair_cache(
+        _previous_wall_pair_cache, car_width_mm, 'previous_face_reference')
+
+
+def _remember_current_wall_pair(car_width_mm, pair):
+    """只保存当前面车壁坐标，不长期持有候选点云。"""
+    _wall_pair_cache[float(car_width_mm)] = {
+        'left': float(pair['left']),
+        'right': float(pair['right']),
+        'span': float(pair['right']) - float(pair['left']),
+        'wall_error': float(pair.get('wall_error', 0.0)),
+        'candidate_count': int(pair.get('candidate_count', 0)),
+    }
+
+
+def _infer_from_single_outer_wall(candidates, car_width_mm, source):
+    """仅当当前帧只有一侧外墙大面时，按车宽推算另一侧。"""
+    left_sides = [
+        item for item in candidates
+        if float(item['x_face']) <= -WALL_ONE_SIDE_MIN_ABS_X_M]
+    right_sides = [
+        item for item in candidates
+        if float(item['x_face']) >= WALL_ONE_SIDE_MIN_ABS_X_M]
+    if bool(left_sides) == bool(right_sides):
+        return None
+
+    width_m = float(car_width_mm) / 1000.0
+    if left_sides:
+        side_candidates = left_sides
+        measured_side = 'left'
+    else:
+        side_candidates = right_sides
+        measured_side = 'right'
+    wall = max(
+        side_candidates,
+        key=lambda item: (
+            float(item['y_span']) * float(item['z_span']),
+            int(item['points'])))
+    if measured_side == 'left':
+        left = float(wall['x_face'])
+        right = left + width_m
+    else:
+        right = float(wall['x_face'])
+        left = right - width_m
+    return {
+        'left': left,
+        'right': right,
+        'span': width_m,
+        'wall_error': 0.0,
+        'source': source,
+        'measured_side': measured_side,
+        'candidate_count': len(candidates),
+    }
+
+
+def _refit_walls_near_reference(candidates, reference, car_width_mm):
+    """以上一面为搜索中心，但车壁X坐标必须由当前帧候选重新拟合。"""
+    if reference is None:
+        return None
+
+    def nearest(expected_x):
+        matches = [
+            item for item in candidates
+            if abs(float(item['x_face']) - float(expected_x)) <=
+            WALL_REFERENCE_X_TOLERANCE_M
+        ]
+        if not matches:
+            return None
+        return min(
+            matches,
+            key=lambda item: (
+                abs(float(item['x_face']) - float(expected_x)),
+                -int(item['points'])))
+
+    left = nearest(reference['left'])
+    right = nearest(reference['right'])
+    if left is not None and right is not None and left is not right:
+        result = {
+            'left': float(left['x_face']),
+            'right': float(right['x_face']),
+            'source': 'previous_face_refit',
+            'candidate_count': len(candidates),
+        }
+        result['span'] = result['right'] - result['left']
+        result['wall_error'] = abs(
+            result['span'] - float(car_width_mm) / 1000.0)
+        if (result['span'] > 0 and
+                result['wall_error'] <= ORDER_WALL_SPAN_TOLERANCE_M):
+            return result
+        return None
+
+    current = [candidate for candidate in (left, right) if candidate is not None]
+    inferred = _infer_from_single_outer_wall(
+        current, car_width_mm, 'previous_face_single_refit')
+    if inferred is not None:
+        inferred['candidate_count'] = len(candidates)
+    return inferred
+
+
+def _resolve_global_wall_pair(pts, car_width_mm):
+    """优先当前帧重测车壁，上一面坐标只用于引导弱点云重拟合。"""
+    if (car_width_mm is None or not np.isfinite(car_width_mm) or
+            float(car_width_mm) <= 0):
+        return None
+    candidates = _extract_global_wall_candidates(pts)
+    measured = _select_global_wall_pair(candidates, car_width_mm)
+    if measured is not None:
+        measured['candidate_count'] = len(candidates)
+        _remember_current_wall_pair(car_width_mm, measured)
+        return measured
+
+    strong_candidates = [
+        item for item in candidates
+        if float(item['y_span']) >= WALL_MIN_Y_SPAN_M]
+    inferred = _infer_from_single_outer_wall(
+        strong_candidates, car_width_mm, 'single_wall_inferred')
+    if inferred is not None:
+        _remember_current_wall_pair(car_width_mm, inferred)
+        return inferred
+
+    # 当前面已有缓存时，优先用它引导当前弱点云重拟合；当前帧完全无点
+    # 时才直接复用同一面缓存。
+    cached = _cached_wall_pair(car_width_mm)
+    if cached is not None:
+        refitted = _refit_walls_near_reference(
+            candidates, cached, car_width_mm)
+        if refitted is not None:
+            refitted['source'] = 'current_face_refit'
+            _remember_current_wall_pair(car_width_mm, refitted)
+            return refitted
+        cached['candidate_count'] = len(candidates)
+        return cached
+
+    # 进入新面后不能直接复用上一面坐标；只有当前帧在附近确实找到车壁
+    # 大面时，才接受重新拟合后的当前坐标。
+    refitted = _refit_walls_near_reference(
+        candidates, _previous_wall_pair(car_width_mm), car_width_mm)
+    if refitted is not None:
+        _remember_current_wall_pair(car_width_mm, refitted)
+    return refitted
 
 
 def _detect_floor_z(pts):
@@ -1515,30 +1850,66 @@ def _pair_contains_box(
     return density_reliable and (full_coverage or partial_coverage)
 
 
+def _resolve_pair_occupancy_region(x_left, x_right, z_min, z_max):
+    """按检测层高度H/候选宽度W计算异常物体检查区，坐标及尺寸均为米。
+
+    底部避让=min(0.20H, 0.50W, 80mm)，防止固定忽略半层漏掉横倒箱体。
+    X方向沿用现有侧面自身避让；此区域不改变侧面测宽坐标。
+    只按几何设置容差，不能凭本帧点云把大块底部占用自动解释为合法支撑。
+    """
+    bounds = np.asarray((x_left, x_right, z_min, z_max), dtype=float)
+    if not np.isfinite(bounds).all():
+        return None
+    x_left, x_right, z_min, z_max = map(float, bounds)
+    width = x_right - x_left
+    height = z_max - z_min
+    if width <= 1e-6 or height <= 1e-6:
+        return None
+    bottom_margin = min(
+        height * PAIR_OCCUPANCY_BOTTOM_HEIGHT_RATIO,
+        width * PAIR_OCCUPANCY_BOTTOM_WIDTH_RATIO,
+        PAIR_OCCUPANCY_BOTTOM_MAX_M)
+    side_margin = min(PAIR_OCCUPANCY_SIDE_MARGIN_M, width * 0.1)
+    check_height = height - bottom_margin
+    window_height = min(
+        check_height,
+        max(PAIR_OCCUPANCY_WINDOW_MIN_M,
+            min(height * PAIR_OCCUPANCY_WINDOW_HEIGHT_RATIO,
+                width * PAIR_OCCUPANCY_WINDOW_WIDTH_RATIO)))
+    return {
+        'x_min': x_left + side_margin,
+        'x_max': x_right - side_margin,
+        'z_min': z_min + bottom_margin,
+        'z_max': z_max,
+        'width_m': width,
+        'height_m': height,
+        'height_width_ratio': height / width,
+        'bottom_margin_m': bottom_margin,
+        'window_height_m': window_height,
+    }
+
+
 def _measure_pair_occupancy_by_height(
         evidence_pts, x_left, x_right, z_min, z_max):
-    """按 X-Z 分层统计候选区间占用情况。
+    """统计全高、自适应检查区及重叠高度窗口的占用，保留分层诊断。
 
-    普通一维占用会把目标箱高内所有 Z 点压到 X 轴；阶梯垛中，下半部已有
-    箱体会因此遮住上半部真实缺口。本函数保留全高结果供日志诊断，同时用
-    目标箱高上半部的覆盖率/密度作为阶梯缺口的占用判据。
+    检查区覆盖底部小容差以上的整个高度；局部窗口防止低矮障碍的点数
+    被整层平均密度稀释。不同窗口的密度按宽度和高度归一化后比较。
     """
+    region = _resolve_pair_occupancy_region(x_left, x_right, z_min, z_max)
+    if region is not None:
+        evidence_pts = evidence_pts[
+            (evidence_pts[:, 2] >= z_min) & (evidence_pts[:, 2] <= z_max)]
     overall = _measure_pair_occupancy(evidence_pts, x_left, x_right)
-    z_min = float(z_min)
-    z_max = float(z_max)
-    if (not np.isfinite(z_min) or not np.isfinite(z_max) or
-            z_max <= z_min + 1e-6):
-        return {
-            'coverage': overall[0],
-            'density': overall[1],
-            'count': overall[2],
-            'bins': overall[3],
-            'upper_coverage': overall[0],
-            'upper_density': overall[1],
-            'upper_count': overall[2],
-            'upper_bins': overall[3],
-            'row_coverages': (),
-        }
+    result = {
+        'coverage': overall[0], 'density': overall[1],
+        'count': overall[2], 'bins': overall[3],
+        'check_coverage': overall[0], 'check_density': overall[1],
+        'check_count': overall[2], 'check_bins': overall[3],
+        'row_coverages': (), 'region': region, 'height_windows': (),
+    }
+    if region is None:
+        return result
 
     z_row_count = max(
         2, int(math.ceil((z_max - z_min) / PAIR_OCCUPANCY_Z_BIN_M)))
@@ -1553,31 +1924,61 @@ def _measure_pair_occupancy_by_height(
             evidence_pts[row_mask], x_left, x_right)
         row_coverages.append(float(row_coverage))
 
-    upper_z = z_min + (
-        (z_max - z_min) * PAIR_OCCUPANCY_UPPER_FRACTION)
-    upper_pts = evidence_pts[evidence_pts[:, 2] >= upper_z]
-    upper = _measure_pair_occupancy(upper_pts, x_left, x_right)
-    return {
-        'coverage': overall[0],
-        'density': overall[1],
-        'count': overall[2],
-        'bins': overall[3],
-        'upper_coverage': upper[0],
-        'upper_density': upper[1],
-        'upper_count': upper[2],
-        'upper_bins': upper[3],
-        'row_coverages': tuple(row_coverages),
-    }
+    check_pts = evidence_pts[evidence_pts[:, 2] >= region['z_min']]
+    checked = _measure_pair_occupancy(check_pts, x_left, x_right)
+    # 相邻窗口重叠至少50%，避免障碍刚好跨窗口边界而被拆散。
+    window_height = region['window_height_m']
+    travel = max(0.0, region['z_max'] - region['z_min'] - window_height)
+    window_count = max(1, int(math.ceil(travel / (window_height * 0.5))) + 1)
+    height_windows = []
+    for start_z in np.linspace(region['z_min'], region['z_min'] + travel, window_count):
+        end_z = float(start_z + window_height)
+        window_pts = check_pts[
+            (check_pts[:, 2] >= start_z) & (check_pts[:, 2] <= end_z)]
+        measured = _measure_pair_occupancy(window_pts, x_left, x_right)
+        inner_pts = window_pts[
+            (window_pts[:, 0] >= region['x_min']) &
+            (window_pts[:, 0] <= region['x_max'])]
+        z_span = float(np.ptp(inner_pts[:, 2])) if len(inner_pts) else 0.0
+        required_z_span = min(
+            PAIR_OCCUPANCY_WINDOW_ZSPAN_MAX_M,
+            window_height * PAIR_OCCUPANCY_WINDOW_ZSPAN_RATIO)
+        height_windows.append({
+            'z_min': float(start_z), 'z_max': end_z,
+            'coverage': measured[0], 'area_density': measured[1] / window_height,
+            'count': measured[2], 'bins': measured[3],
+            'z_span_m': z_span, 'height_reliable': z_span >= required_z_span,
+        })
+    result.update(
+        check_coverage=checked[0], check_density=checked[1],
+        check_count=checked[2], check_bins=checked[3],
+        row_coverages=tuple(row_coverages), height_windows=tuple(height_windows))
+    return result
+
+
+def _find_occupied_height_window(occupancy, reference_coverage, reference_density):
+    """返回自适应区内检出连续箱面的局部窗口；薄片和稀疏点不单独否决。"""
+    matches = [
+        window for window in occupancy.get('height_windows', ())
+        if window['height_reliable'] and _pair_contains_box(
+            window['coverage'], window['area_density'],
+            reference_coverage, reference_density)
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda item: (item['coverage'], item['area_density']))
 
 
 def _resolve_order_target_x(
-        candidates, target_y_mm, car_width_mm, expected_width_mm):
+        candidates, target_y_mm, car_width_mm, expected_width_mm,
+        wall_pair=None):
     """用实测左右车壁把订单 Y 区间线性映射到点云 X 区间。
 
     订单 Y=0 位于点云右壁，Y 增大方向与点云 X 增大方向相反，因此映射时
     必须从右壁向左计算；返回值仍按点云 X 从小到大排列为 left/right。
-    只使用常规法向聚类寻找车壁，并要求实测壁间距接近订单车宽；条件不满足
-    时返回 None，禁止仅凭理论位置创建候选面。
+    优先使用外部传入的全局车壁；未传入时保留当前层常规法向聚类的
+    兼容逻辑。两种情况都要求车壁间距接近订单车宽；条件不满足时返回
+    None，禁止仅凭理论位置创建候选面。
     """
     values = (target_y_mm, car_width_mm, expected_width_mm)
     if any(value is None or not np.isfinite(value) for value in values):
@@ -1590,97 +1991,107 @@ def _resolve_order_target_x(
             target_y_mm + expected_width_mm > car_width_mm + 1e-6):
         return None
 
-    real_candidates = sorted(
-        (
-            candidate for candidate in candidates
-            if candidate.get('source') == 'normal_cluster'
-        ),
-        key=lambda item: item['x_face'])
-    wall_pair = None
-    wall_error = float('inf')
-    expected_wall_span_m = car_width_mm / 1000.0
-    for left_index, left in enumerate(real_candidates):
-        for right in real_candidates[left_index + 1:]:
-            wall_span = float(right['x_face'] - left['x_face'])
-            error = abs(wall_span - expected_wall_span_m)
-            if wall_span > 0 and error < wall_error:
-                wall_pair = (left, right)
-                wall_error = error
-    if (wall_pair is None or
-            wall_error > ORDER_WALL_SPAN_TOLERANCE_M):
-        return None
+    wall_source = 'current_layer'
+    if wall_pair is None:
+        real_candidates = sorted(
+            (
+                candidate for candidate in candidates
+                if candidate.get('source') == 'normal_cluster'
+            ),
+            key=lambda item: item['x_face'])
+        selected_pair = None
+        wall_error = float('inf')
+        expected_wall_span_m = car_width_mm / 1000.0
+        for left_index, left in enumerate(real_candidates):
+            for right in real_candidates[left_index + 1:]:
+                wall_span = float(right['x_face'] - left['x_face'])
+                error = abs(wall_span - expected_wall_span_m)
+                if wall_span > 0 and error < wall_error:
+                    selected_pair = (left, right)
+                    wall_error = error
+        if (selected_pair is None or
+                wall_error > ORDER_WALL_SPAN_TOLERANCE_M):
+            return None
+        wall_left_x, wall_right_x = sorted(
+            (float(selected_pair[0]['x_face']),
+             float(selected_pair[1]['x_face'])))
+    else:
+        wall_left_x, wall_right_x = sorted(
+            (float(wall_pair['left']), float(wall_pair['right'])))
+        wall_error = abs(
+            (wall_right_x - wall_left_x) - car_width_mm / 1000.0)
+        if wall_error > ORDER_WALL_SPAN_TOLERANCE_M:
+            return None
+        wall_source = wall_pair.get('source', 'external')
 
-    wall_left, wall_right = sorted(
-        wall_pair, key=lambda item: item['x_face'])
-    wall_span = float(wall_right['x_face'] - wall_left['x_face'])
+    wall_span = wall_right_x - wall_left_x
     target_left = (
-        float(wall_right['x_face']) -
+        wall_right_x -
         (target_y_mm + expected_width_mm) /
         car_width_mm * wall_span)
     target_right = (
-        float(wall_right['x_face']) -
+        wall_right_x -
         target_y_mm / car_width_mm * wall_span)
     return {
         'left': target_left,
         'right': target_right,
-        'wall_left': float(wall_left['x_face']),
-        'wall_right': float(wall_right['x_face']),
+        'wall_left': wall_left_x,
+        'wall_right': wall_right_x,
         'wall_error': wall_error,
+        'wall_source': wall_source,
     }
+
+
+def _is_reliable_order_edge(candidate, pass_z, log_callback=None):
+    """补边/虚拟兜底共用质量门槛；侧面不再追加层高比例过滤。
+
+    侧面仅保留原基础薄片过滤及点数要求。正面突变的高度质量检查保持不变，
+    防止取消侧面二次高度门槛时，把水平薄片也放宽成正面边界。
+    """
+    if candidate.get('source') not in (
+            'normal_cluster', 'tilt_outer', 'front_gap_edge'):
+        return False
+    layer_z_span = max(0.0, float(pass_z[1]) - float(pass_z[0]))
+    required_z_span = MIN_CLUSTER_ZSPAN_M
+
+    points = np.asarray(candidate.get('pts', ()))
+    point_count = len(points)
+    z_span = (
+        float(np.ptp(points[:, 2]))
+        if points.ndim == 2 and points.shape[1] >= 3 and point_count > 0
+        else 0.0
+    )
+    if candidate.get('source') == 'front_gap_edge':
+        required_z_span = min(
+            FRONT_GAP_EDGE_MAX_ZSPAN_M,
+            max(FRONT_GAP_EDGE_MIN_ZSPAN_M,
+                layer_z_span * FRONT_GAP_EDGE_MIN_ZSPAN_RATIO))
+    reliable = (
+        point_count >= ORDER_TARGET_EDGE_MIN_PTS and
+        z_span >= required_z_span)
+    if not reliable:
+        report = log_callback if log_callback is not None else _dbg
+        report(
+            f"订单边界候选 k={candidate.get('k')} 质量不足："
+            f"点数={point_count}（要求≥{ORDER_TARGET_EDGE_MIN_PTS}），"
+            f"zspan={z_span * 1000:.0f}mm"
+            f"（要求≥{required_z_span * 1000:.0f}mm）；"
+            "不能阻止正面补边或订单虚拟兜底")
+    return reliable
 
 
 def _add_missing_order_edge_candidate(
         candidates, target_range, pass_y, pass_z):
-    """订单目标仅缺一侧实测边界时，补一个可被占用检查否决的虚拟边界。"""
+    """正面补边后仍仅缺一侧可靠边界时，补可被占用检查否决的虚拟边界。"""
     if target_range is None:
         return None
-
-    layer_z_span = max(0.0, float(pass_z[1]) - float(pass_z[0]))
-    required_z_span = min(
-        ORDER_TARGET_EDGE_MAX_ZSPAN_M,
-        max(
-            ORDER_TARGET_EDGE_MIN_ZSPAN_M,
-            layer_z_span * ORDER_TARGET_EDGE_MIN_ZSPAN_RATIO,
-        ),
-    )
-
-    def _is_reliable_order_edge(candidate):
-        """按点数和当前层有效高度判断候选边界能否覆盖虚拟边界。"""
-        points = np.asarray(candidate.get('pts', ()))
-        point_count = len(points)
-        z_span = (
-            float(np.ptp(points[:, 2]))
-            if points.ndim == 2 and points.shape[1] >= 3 and point_count > 0
-            else 0.0
-        )
-        candidate_required_z_span = required_z_span
-        if candidate.get('source') == 'front_gap_edge':
-            candidate_required_z_span = min(
-                FRONT_GAP_EDGE_MAX_ZSPAN_M,
-                max(
-                    ORDER_TARGET_EDGE_MIN_ZSPAN_M,
-                    layer_z_span * FRONT_GAP_EDGE_MIN_ZSPAN_RATIO,
-                ),
-            )
-        reliable = (
-            point_count >= ORDER_TARGET_EDGE_MIN_PTS and
-            z_span >= candidate_required_z_span
-        )
-        if not reliable:
-            _dbg(
-                f"订单边界候选 k={candidate.get('k')} 质量不足，"
-                f"不覆盖订单虚拟边界：点数={point_count}"
-                f"（要求≥{ORDER_TARGET_EDGE_MIN_PTS}），"
-                f"zspan={z_span * 1000:.0f}mm"
-                f"（要求≥{candidate_required_z_span * 1000:.0f}mm）")
-        return reliable
+    reliable_candidates = [
+        candidate for candidate in candidates
+        if _is_reliable_order_edge(candidate, pass_z)
+    ]
 
     def _nearest(edge_x):
         """返回距订单边界最近的可靠候选及其绝对误差。"""
-        reliable_candidates = [
-            candidate for candidate in candidates
-            if _is_reliable_order_edge(candidate)
-        ]
         if not reliable_candidates:
             return None, float('inf')
         candidate = min(
@@ -1724,7 +2135,9 @@ def _detect_front_gap_edge_candidate(
 
     ``target_range`` 内侧是待放置缺口：left边界应表现为左侧有箱、右侧为空；
     right边界则应表现为左侧为空、右侧有箱。这里只在订单边界附近搜索，并且
-    使用目标箱高上半部，避免阶梯垛下半层已有箱体把真实缺口填满。
+    使用与占用复核相同的宽高比自适应Z范围，只排除底部小容差。
+    边界必须紧邻具有多高度支持的连续箱面，不能仅凭远处箱面的点数差定位。
+    最后用边缘分箱内逐高度观测的边缘坐标中位数消除分箱起点误差。
     """
     if target_range is None or side_name not in ('left', 'right'):
         return None
@@ -1736,10 +2149,13 @@ def _detect_front_gap_edge_candidate(
     if (not np.isfinite(z_min) or not np.isfinite(z_max) or
             z_max <= z_min + 1e-6):
         return None
-    upper_z = z_min + (
-        (z_max - z_min) * PAIR_OCCUPANCY_UPPER_FRACTION)
-    upper_points = points[points[:, 2] >= upper_z]
-    if len(upper_points) < FRONT_GAP_EDGE_MIN_BOX_PTS:
+    region = _resolve_pair_occupancy_region(
+        target_range['left'], target_range['right'], z_min, z_max)
+    if region is None:
+        return None
+    check_points = points[
+        (points[:, 2] >= region['z_min']) & (points[:, 2] <= region['z_max'])]
+    if len(check_points) < FRONT_GAP_EDGE_MIN_BOX_PTS:
         return None
 
     target_x = float(target_range[side_name])
@@ -1757,7 +2173,19 @@ def _detect_front_gap_edge_candidate(
         window_bins * 2 + 1,
         int(math.ceil((x_max - x_min) / FRONT_GAP_EDGE_BIN_M)))
     edges = x_min + np.arange(bin_count + 1) * FRONT_GAP_EDGE_BIN_M
-    hist, _ = np.histogram(upper_points[:, 0], bins=edges)
+    hist, _ = np.histogram(check_points[:, 0], bins=edges)
+    z_edges = region['z_min'] + np.arange(
+        int(math.ceil((region['z_max'] - region['z_min']) /
+                      FRONT_GAP_EDGE_Z_BIN_M)) + 1) * FRONT_GAP_EDGE_Z_BIN_M
+    xz_hist, _, _ = np.histogram2d(
+        check_points[:, 0], check_points[:, 2], bins=(edges, z_edges))
+    height_support = np.count_nonzero(xz_hist, axis=1)
+    supported = ((hist >= FRONT_GAP_EDGE_MIN_PTS_PER_BIN) &
+                 (height_support >= FRONT_GAP_EDGE_MIN_Z_BINS))
+    required_z_span = min(
+        FRONT_GAP_EDGE_MAX_ZSPAN_M,
+        max(FRONT_GAP_EDGE_MIN_ZSPAN_M,
+            (z_max - z_min) * FRONT_GAP_EDGE_MIN_ZSPAN_RATIO))
 
     matches = []
     for edge_index in range(window_bins, len(hist) - window_bins + 1):
@@ -1770,14 +2198,30 @@ def _detect_front_gap_edge_candidate(
         if side_name == 'left':
             box_hist, gap_hist = left_hist, right_hist
             box_x_range = (edge_x - FRONT_GAP_EDGE_WINDOW_M, edge_x)
+            box_support = supported[edge_index - window_bins:edge_index][::-1]
+            gap_support = supported[edge_index:edge_index + window_bins]
+            adjacent_gap_supported = supported[edge_index]
+            boundary_bin = edge_index - 1
         else:
             gap_hist, box_hist = left_hist, right_hist
             box_x_range = (edge_x, edge_x + FRONT_GAP_EDGE_WINDOW_M)
+            box_support = supported[edge_index:edge_index + window_bins]
+            gap_support = supported[edge_index - window_bins:edge_index]
+            adjacent_gap_supported = supported[edge_index - 1]
+            boundary_bin = edge_index
 
-        box_coverage = float(np.count_nonzero(
-            box_hist >= FRONT_GAP_EDGE_MIN_PTS_PER_BIN) / len(box_hist))
-        gap_coverage = float(np.count_nonzero(
+        # 从空白直接进入连续箱面。旧60%窗口覆盖允许前方空40mm，甚至把
+        # 局部杂点与远处箱面拼成边界；这里禁止中间隔着空白的“提前边界”。
+        if (adjacent_gap_supported or
+                not np.all(box_support[:FRONT_GAP_EDGE_MIN_RUN_BINS])):
+            continue
+
+        box_coverage = float(np.count_nonzero(box_support) / len(box_hist))
+        # 边缘形状按多高度支持判断，避免两条薄片扫线遮住真实空白。
+        # 密度比仍使用全部原始点，且后续独立的区间占用检查不删点、不放宽。
+        raw_gap_coverage = float(np.count_nonzero(
             gap_hist >= FRONT_GAP_EDGE_MIN_PTS_PER_BIN) / len(gap_hist))
+        gap_coverage = float(np.count_nonzero(gap_support) / len(gap_hist))
         box_count = int(box_hist.sum())
         gap_count = int(gap_hist.sum())
         density_ratio = box_count / float(max(gap_count, 1))
@@ -1787,14 +2231,48 @@ def _detect_front_gap_edge_candidate(
                 density_ratio < FRONT_GAP_EDGE_MIN_DENSITY_RATIO):
             continue
 
-        # 点数差比单纯贴近订单更能准确落到真实突变；相同时再选订单误差小者。
+        boundary_points = check_points[
+            (check_points[:, 0] >= edges[boundary_bin]) &
+            (check_points[:, 0] < edges[boundary_bin + 1])]
+        row_ids = np.minimum(
+            ((boundary_points[:, 2] - region['z_min']) /
+             FRONT_GAP_EDGE_Z_BIN_M).astype(int), len(z_edges) - 2)
+        row_edges = [
+            float(np.quantile(boundary_points[row_ids == row, 0],
+                              .9 if side_name == 'left' else .1))
+            for row in np.unique(row_ids)
+        ]
+        if len(row_edges) < FRONT_GAP_EDGE_MIN_Z_BINS:
+            continue
+        refined_x = float(np.median(row_edges))
+        refined_error = abs(refined_x - target_x)
+        if refined_error > FRONT_GAP_EDGE_SEARCH_M + 1e-9:
+            continue
+        box_left, box_right = box_x_range
+        candidate_points = points[
+            (points[:, 0] >= box_left) & (points[:, 0] <= box_right)]
+        z_span = float(np.ptp(candidate_points[:, 2])) if len(candidate_points) else 0.
+        if (len(candidate_points) < ORDER_TARGET_EDGE_MIN_PTS or
+                z_span < required_z_span):
+            _dbg(
+                f"正面突变候选质量不足：目标{side_name} x={refined_x:+.3f}m，"
+                f"点数={len(candidate_points)}，zspan={z_span * 1000:.0f}mm，"
+                f"要求点数≥{ORDER_TARGET_EDGE_MIN_PTS}、"
+                f"zspan≥{required_z_span * 1000:.0f}mm")
+            continue
+
+        # 几何连续性优先于点数，避免一条密集扫描线拉偏边界。
         contrast = box_count - gap_count
         matches.append({
-            'score': (-contrast, edge_error),
-            'x_face': edge_x,
-            'edge_error': edge_error,
+            'score': (-box_coverage, gap_coverage, refined_error, -contrast),
+            'x_face': refined_x,
+            'grid_edge_x': edge_x,
+            'height_support_bins': len(row_edges),
+            'candidate_points': candidate_points,
+            'edge_error': refined_error,
             'box_coverage': box_coverage,
             'gap_coverage': gap_coverage,
+            'raw_gap_coverage': raw_gap_coverage,
             'box_count': box_count,
             'gap_count': gap_count,
             'density_ratio': density_ratio,
@@ -1804,84 +2282,136 @@ def _detect_front_gap_edge_candidate(
     if not matches:
         return None
     best = min(matches, key=lambda item: item['score'])
-    box_left, box_right = best['box_x_range']
-    # 候选质量使用全高正面点统计；位置仍取上半部检出的突变坐标。
-    candidate_points = points[
-        (points[:, 0] >= box_left) &
-        (points[:, 0] <= box_right)]
-    required_z_span = min(
-        FRONT_GAP_EDGE_MAX_ZSPAN_M,
-        max(
-            ORDER_TARGET_EDGE_MIN_ZSPAN_M,
-            (z_max - z_min) * FRONT_GAP_EDGE_MIN_ZSPAN_RATIO,
-        ),
-    )
-    z_span = (
-        float(np.ptp(candidate_points[:, 2]))
-        if len(candidate_points) else 0.0)
-    if (len(candidate_points) < ORDER_TARGET_EDGE_MIN_PTS or
-            z_span < required_z_span):
-        _dbg(
-            f"正面突变候选质量不足：目标{side_name} x={best['x_face']:+.3f}m，"
-            f"点数={len(candidate_points)}，zspan={z_span * 1000:.0f}mm，"
-            f"要求点数≥{ORDER_TARGET_EDGE_MIN_PTS}、"
-            f"zspan≥{required_z_span * 1000:.0f}mm")
-        return None
+    _dbg(
+        f"正面连续边缘：目标{side_name}，分箱边界={best['grid_edge_x']:+.3f}m，"
+        f"逐高度边缘中位数={best['x_face']:+.3f}m，"
+        f"高度支持={best['height_support_bins']}格，"
+        f"连续箱面≥{FRONT_GAP_EDGE_MIN_RUN_BINS * FRONT_GAP_EDGE_BIN_M * 1000:.0f}mm")
 
     return {
         'k': f'front_gap_{side_name}',
-        'pts': candidate_points,
+        'pts': best['candidate_points'],
         'x_face': best['x_face'],
         'source': 'front_gap_edge',
         'side_name': side_name,
         'edge_error': best['edge_error'],
         'box_coverage': best['box_coverage'],
         'gap_coverage': best['gap_coverage'],
+        'raw_gap_coverage': best['raw_gap_coverage'],
         'box_count': best['box_count'],
         'gap_count': best['gap_count'],
         'density_ratio': best['density_ratio'],
+        'check_region': region,
+        'edge_method': 'height_supported_contiguous_edge',
+        'grid_edge_x': best['grid_edge_x'],
+        'height_support_bins': best['height_support_bins'],
     }
 
 
 def _add_front_gap_edge_candidates(
-        candidates, front_gap_pts, target_range, pass_y, pass_z):
-    """为缺失的订单侧面边界补充正面点云突变候选，返回新增候选列表。"""
+        candidates, front_gap_pts, target_range, pass_y, pass_z,
+        log_callback=None):
+    """目标侧面缺失或质量不足时用正面突变补齐，返回新增候选列表。
+
+    车壁和可靠侧面/倾斜候选保持优先。弱侧面不能阻止正面提取；补边成功后
+    弱候选只保留作占用参照，不再抢占最终结果。正面检不出时，阶梯模式才
+    继续尝试订单虚拟边界兜底。
+    """
     if target_range is None:
         return []
+    report = log_callback if log_callback is not None else _dbg
 
-    layer_z_span = max(0.0, float(pass_z[1]) - float(pass_z[0]))
-    required_z_span = min(
-        ORDER_TARGET_EDGE_MAX_ZSPAN_M,
-        max(
-            ORDER_TARGET_EDGE_MIN_ZSPAN_M,
-            layer_z_span * ORDER_TARGET_EDGE_MIN_ZSPAN_RATIO,
-        ),
+    wall_positions = (
+        float(target_range['wall_left']),
+        float(target_range['wall_right']),
     )
 
-    def _already_found(edge_x):
-        """判断订单边界附近是否已有高度和点数均可靠的候选。"""
-        for candidate in candidates:
-            points = np.asarray(candidate.get('pts', ()))
-            if (points.ndim != 2 or points.shape[1] < 3 or
-                    len(points) < ORDER_TARGET_EDGE_MIN_PTS):
-                continue
-            z_span = float(np.ptp(points[:, 2]))
-            if (z_span >= required_z_span and
-                    abs(float(candidate['x_face']) - edge_x) <=
-                    ORDER_TARGET_EDGE_MATCH_M):
-                return True
-        return False
+    def _is_wall_candidate(candidate):
+        """保留订单映射所用车壁，避免以墙体厚度突变替代车壁平面。"""
+        if candidate.get('source') != 'normal_cluster':
+            return False
+        x_face = float(candidate['x_face'])
+        return any(
+            abs(x_face - wall_x) <= 1e-6
+            for wall_x in wall_positions)
 
     added = []
     for side_name in ('left', 'right'):
-        if _already_found(float(target_range[side_name])):
+        target_x = float(target_range[side_name])
+        # 缺口贴车壁时，车壁平面就是该侧真实边界；墙体表面的点云突变受厚度和
+        # 扫描角影响，不应替代已经标定出的车壁位置。
+        if any(
+                abs(target_x - wall_x) <= 1e-6
+                for wall_x in wall_positions):
             continue
+
+        side_candidates = [
+            existing for existing in candidates
+            if existing.get('source') in ('normal_cluster', 'tilt_outer')
+            and not _is_wall_candidate(existing)
+            and abs(float(existing['x_face']) - target_x) <=
+            ORDER_TARGET_EDGE_MATCH_M
+        ]
+        reliable_sides = [
+            existing for existing in side_candidates
+            if _is_reliable_order_edge(existing, pass_z, report)
+        ]
+        if reliable_sides:
+            selected_side = min(
+                reliable_sides,
+                key=lambda item: abs(float(item['x_face']) - target_x))
+            _dbg(
+                f"目标{side_name}优先使用侧面候选 "
+                f"k={selected_side.get('k')} "
+                f"x={float(selected_side['x_face']):+.3f}m，"
+                "正面缺口突变仅作缺边兜底，本侧不参与")
+            continue
+
+        reason = ('side_candidate_weak' if side_candidates
+                  else 'side_candidate_missing')
+        report(
+            f"目标{side_name}侧面{'质量不足' if side_candidates else '缺失'}，"
+            "先尝试正面突变补边")
         candidate = _detect_front_gap_edge_candidate(
             front_gap_pts, target_range, side_name, pass_y, pass_z)
         if candidate is not None:
+            candidate['fallback_reason'] = reason
+            for existing in side_candidates:
+                existing['superseded_by'] = candidate['k']
             candidates.append(candidate)
             added.append(candidate)
+        else:
+            report(
+                f"目标{side_name}正面补边未找到可靠突变边界；"
+                "若满足阶梯模式及单侧实测条件，再尝试订单虚拟边界兜底")
     return added
+
+
+def _format_width_method(left, right, gap_mm, expected_width_mm):
+    """按最终选中边界标明测宽来源，而非按生成过哪些候选来判断。"""
+    names = {
+        'normal_cluster': '侧面聚类',
+        'tilt_outer': '倾斜外侧补偿',
+        'front_gap_edge': '正面突变补边',
+        'order_virtual': '订单虚拟边界',
+    }
+    sources = {left.get('source'), right.get('source')}
+    if 'order_virtual' in sources:
+        method, note = '虚拟边界兜底', '包含订单推算边界，非双侧实测'
+    elif 'front_gap_edge' in sources:
+        method, note = '正面补边测宽', '采用点云实测突变边界'
+    elif 'tilt_outer' in sources:
+        method, note = '倾斜外侧补偿测宽', '包含倾斜外侧补偿边界'
+    else:
+        method, note = '侧面测宽', '双侧侧面聚类间距'
+    return (
+        f"[STACK-WIDTH] 测宽方式={method}；"
+        f"点云X左边界={names.get(left.get('source'), '未知')}"
+        f"(k={left['k']},x={left['x_face']:+.3f}m)；"
+        f"点云X右边界={names.get(right.get('source'), '未知')}"
+        f"(k={right['k']},x={right['x_face']:+.3f}m)；"
+        f"测量宽度={gap_mm}mm，理论抓宽={float(expected_width_mm):.0f}mm；"
+        f"{note}，status=1")
 
 
 def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
@@ -1907,12 +2437,12 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     target_y_mm / car_width_mm: 当前抓在订单车宽方向的起点和车厢宽度(mm)。
                     所有模式都会在左右车壁可靠时换算目标X区间并约束候选缺口。
     detection_target_y_mm: 真实缺口在订单车宽方向的起点；未提供时使用target_y_mm。
-                    stair_step_mode=True 且目标单侧边界缺失时，额外先用正面点云
-                    有点/空白突变补边；正面突变也不存在且上半部为空时，才允许
-                    订单虚拟边界参与。
+                    所有模式都优先使用法向聚类得到的箱体侧面；目标某侧没有
+                    侧面候选时，才用正面点云有点/空白突变补边。阶梯模式两种
+                    实测边界都缺失且自适应检查区为空时，才允许订单虚拟边界参与。
     stair_step_mode: 混装阶梯垛模式；启用 X-Z 分层占用检查。
     box_type: 当前抓箱型；首位为2表示细支烟箱。细支烟箱第一层计算失败时，
-                    兜底返回理论宽度+一个单箱宽度。
+                    可兜底返回理论宽度+一个单箱宽度；阶梯目标已明确占用时禁止此兜底。
     log_callback: 检测到箱体倾斜及二次复核结果的日志回调；在线模式传主节点 logger.warning。
 
     策略：
@@ -1922,8 +2452,9 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
       3. 法向量滤波保留 ±x 侧面点
       4. DBSCAN 聚类，所有有效候选面两两组合
       5. 按订单目标位置筛选候选，并保留检测参考宽度 ± 1.5个单箱宽度的组合
-      6. 阶梯模式侧边缺失时，在订单边界附近检查正面点云突变并补充实测候选
-      7. 检查两面之间的点云覆盖率/密度；阶梯模式按 X-Z 分层判断上半部
+      6. 优先采用订单边界附近的可靠实测侧面；目标某侧缺失或只有弱候选时，
+         才用正面点云突变补齐（贴车壁的边界始终使用实测车壁）
+      7. 检查两面之间的点云覆盖率/密度；阶梯模式按宽高比确定范围并分高度复核
       8. 在剩余空缺口中取最接近真实缺口宽度者，宽度 = 右面 x - 左面 x
     """
     if view is None:
@@ -1956,6 +2487,10 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
         _dbg(f"偏航补偿：绕 J1 轴 {J1_AXIS_XY} 旋转 {_ang:+.1f}°")
     elif yaw_offset_deg:
         _dbg(f"偏航补偿角={yaw_offset_deg:.1f}°，但 J1_AXIS_XY 未标定 → 跳过补偿")
+
+    # 车壁标定保留偏航补偿后的全局点云引用。后续缺口测宽仍会按当前面Y和
+    # 当前层Z裁剪，但车壁检测不再跟随这个局部窗口。
+    global_wall_pts = pts
 
     start_time = time.time()
 
@@ -2031,7 +2566,7 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 _dbg(f"倾斜异常日志回调失败：{type(exc).__name__}: {exc}")
 
     def _report_stair_step(detail):
-        """把阶梯缺口补偿结果写入在线主日志，便于结合订单和点云复盘。"""
+        """把补边过程及最终测宽方式写入在线主日志，不依赖 DEBUG。"""
         _dbg(detail)
         if log_callback is not None:
             try:
@@ -2039,13 +2574,18 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             except Exception as exc:
                 _dbg(f"阶梯缺口日志回调失败：{type(exc).__name__}: {exc}")
 
-    def _failure_result(detail):
-        """普通失败返回None；细支烟箱第一层按现场策略返回安全兜底宽度。"""
-        if not slim_first_layer_fallback:
+    def _failure_result(detail, *, allow_slim_fallback=True):
+        """普通失败返回None；未被明确占用否决时允许细支首层估算兜底。"""
+        if not slim_first_layer_fallback or not allow_slim_fallback:
             _report_tilt_result(False, detail)
+            _report_stair_step(
+                f"[STACK-WIDTH] 测宽方式=无有效结果；{detail}，status=2")
             return None
         fallback_mm = int(round(
             float(expected_width_mm) + float(box_width_mm)))
+        _report_stair_step(
+            f"[STACK-WIDTH] 测宽方式=细支首层估算兜底；"
+            f"测量宽度={fallback_mm}mm，非点云实测；原因={detail}，status=1")
         if tilt_message_base is not None:
             message = (
                 f"{tilt_message_base}；倾斜候选面复核失败：{detail}；"
@@ -2261,6 +2801,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     else:
         detection_width_mm = float(detection_width_mm)
 
+    order_position_required = (
+        detection_target_y_mm is not None or target_y_mm is not None)
     if detection_target_y_mm is None:
         detection_target_y_mm = target_y_mm
     elif not np.isfinite(detection_target_y_mm):
@@ -2270,12 +2812,22 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     else:
         detection_target_y_mm = float(detection_target_y_mm)
 
-    # 所有垛面模式均优先使用订单位置。只有实测左右车壁能够可靠标定时才启用，
-    # 避免车壁缺失时仅凭理论坐标把正确缺口排除。
+    # 车壁使用独立的全深度、全高度大面检测；当前帧失败时可复用本订单缓存，
+    # 再失败才允许由唯一单侧大车壁结合订单车宽推算另一侧。缺口侧面本身仍
+    # 使用当前面、当前层局部点云，不改变现有测宽范围。
+    global_wall_pair = _resolve_global_wall_pair(
+        global_wall_pts, car_width_mm)
     target_range = _resolve_order_target_x(
         candidates, detection_target_y_mm, car_width_mm,
-        detection_width_mm)
+        detection_width_mm, wall_pair=global_wall_pair)
     if target_range is None:
+        if order_position_required:
+            message = (
+                "订单目标位置无法确认：当前面双侧、单侧及局部车壁"
+                "均未提取成功，禁止直接复用上一面坐标")
+            _report_stair_step(message)
+            _dbg(f"计算失败：{message}")
+            return _failure_result(message)
         if stair_step_mode:
             message = (
                 "阶梯缺口模式：订单位置无效或左右车壁标定失败，"
@@ -2287,6 +2839,36 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 "退回宽度候选组合")
     else:
         mode_name = "阶梯缺口模式" if stair_step_mode else "订单位置约束"
+        wall_source_names = {
+            'global_measured': '当前帧全局大面实测',
+            'current_face_refit': '当前面历史位置引导当前帧弱点重拟合',
+            'current_face_cache': '同一面历史车壁缓存',
+            'previous_face_refit': '上一面位置引导当前帧双侧弱点重拟合',
+            'previous_face_single_refit': '上一面位置引导当前帧单侧弱点重拟合',
+            'single_wall_inferred': '当前帧单侧大面＋订单车宽推算',
+            'current_layer': '当前层局部候选',
+        }
+        wall_source = target_range.get('wall_source', 'current_layer')
+        if wall_source == 'current_layer':
+            _remember_current_wall_pair(
+                car_width_mm, {
+                    'left': target_range['wall_left'],
+                    'right': target_range['wall_right'],
+                    'wall_error': target_range['wall_error'],
+                })
+        wall_message = (
+            f"[STACK-WALL] 来源={wall_source_names.get(wall_source, wall_source)}；"
+            f"车壁=[{target_range['wall_left']:+.3f},"
+            f"{target_range['wall_right']:+.3f}]m；"
+            f"跨度={(target_range['wall_right'] - target_range['wall_left']) * 1000:.0f}mm；"
+            f"订单车宽={float(car_width_mm):.0f}mm；"
+            f"误差={target_range['wall_error'] * 1000:.0f}mm")
+        if (global_wall_pair is not None and
+                global_wall_pair.get('measured_side') is not None):
+            wall_message += (
+                f"；仅{global_wall_pair.get('measured_side')}侧为点云实测，"
+                "另一侧非实测")
+        _report_stair_step(wall_message)
         _dbg(
             f"{mode_name}：车壁=[{target_range['wall_left']:+.3f},"
             f"{target_range['wall_right']:+.3f}]m，"
@@ -2294,22 +2876,31 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             f"{float(detection_target_y_mm) + float(detection_width_mm):.0f}]mm "
             f"映射X=[{target_range['left']:+.3f},"
             f"{target_range['right']:+.3f}]m")
+        front_gap_candidates = _add_front_gap_edge_candidates(
+            candidates, front_gap_pts, target_range, pass_y, pass_z,
+            log_callback=_report_stair_step)
+        for front_candidate in front_gap_candidates:
+            message = (
+                f"{mode_name}：目标{front_candidate['side_name']}"
+                f"侧面候选{'质量不足' if front_candidate['fallback_reason'] == 'side_candidate_weak' else '缺失'}，"
+                f"使用正面点云突变兜底边界 "
+                f"x={front_candidate['x_face']:+.3f}m，"
+                f"订单边界偏差={front_candidate['edge_error'] * 1000:.0f}mm，"
+                f"缺口侧覆盖={front_candidate['gap_coverage'] * 100:.0f}%，"
+                f"原始缺口侧覆盖={front_candidate['raw_gap_coverage'] * 100:.0f}%，"
+                f"箱体侧覆盖={front_candidate['box_coverage'] * 100:.0f}%，"
+                f"点数={front_candidate['gap_count']}/"
+                f"{front_candidate['box_count']}；"
+                f"方法=多高度支持的连续正面边缘，"
+                f"分箱边界={front_candidate['grid_edge_x']:+.3f}m，"
+                f"高度支持={front_candidate['height_support_bins']}格；"
+                "按逐高度边缘中位数参与测宽")
+            _report_stair_step(message)
+        if view:
+            _show_front_gap_diagnostics(
+                pts, front_gap_pts, target_range,
+                front_gap_candidates, pass_y, pass_z)
         if stair_step_mode:
-            front_gap_candidates = _add_front_gap_edge_candidates(
-                candidates, front_gap_pts, target_range, pass_y, pass_z)
-            for front_candidate in front_gap_candidates:
-                _report_stair_step(
-                    f"阶梯缺口模式：目标{front_candidate['side_name']}侧面缺失，"
-                    f"正面点云检出突变边界 x={front_candidate['x_face']:+.3f}m，"
-                    f"订单边界偏差={front_candidate['edge_error'] * 1000:.0f}mm，"
-                    f"缺口侧覆盖={front_candidate['gap_coverage'] * 100:.0f}%，"
-                    f"箱体侧覆盖={front_candidate['box_coverage'] * 100:.0f}%，"
-                    f"点数={front_candidate['gap_count']}/"
-                    f"{front_candidate['box_count']}；按正面实测边界参与测宽")
-            if view:
-                _show_front_gap_diagnostics(
-                    pts, front_gap_pts, target_range,
-                    front_gap_candidates, pass_y, pass_z)
             virtual_candidate = _add_missing_order_edge_candidate(
                 candidates, target_range, pass_y, pass_z)
             if virtual_candidate is not None:
@@ -2317,9 +2908,23 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                     f"阶梯缺口模式：目标{virtual_candidate['side_name']}边界缺失，"
                     f"由实测候选 k={virtual_candidate['matched_k']} 配合订单位置，"
                     f"加入虚拟候选面 x={virtual_candidate['x_face']:+.3f}m；"
-                    "后续仍须通过上半部占用检查")
+                    "后续仍须通过宽高比自适应区域及局部高度窗口占用检查")
                 _report_stair_step(message)
     height_aware_occupancy = stair_step_mode and target_range is not None
+    if height_aware_occupancy:
+        target_check_region = _resolve_pair_occupancy_region(
+            target_range['left'], target_range['right'], pass_z[0], pass_z[1])
+        if target_check_region is not None:
+            _report_stair_step(
+                "阶梯自适应占用区域："
+                f"H={target_check_region['height_m'] * 1000:.0f}mm，"
+                f"W={target_check_region['width_m'] * 1000:.0f}mm，"
+                f"H/W={target_check_region['height_width_ratio']:.3f}，"
+                f"底部避让={target_check_region['bottom_margin_m'] * 1000:.0f}mm，"
+                f"目标检查Z=[{target_check_region['z_min']:+.3f},"
+                f"{target_check_region['z_max']:+.3f}]m，"
+                f"局部窗口高度={target_check_region['window_height_m'] * 1000:.0f}mm；"
+                "逐候选按实测间距复算区域")
 
     if len(candidates) < 2:
         _dbg(f"计算失败：有效候选面不足2个（当前{len(candidates)}个）")
@@ -2349,7 +2954,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 target_in_range = (
                     left_error <= ORDER_TARGET_PAIR_EDGE_M and
                     right_error <= ORDER_TARGET_PAIR_EDGE_M)
-            selectable = width_in_range and target_in_range
+            superseded = bool(left.get('superseded_by') or right.get('superseded_by'))
+            selectable = width_in_range and target_in_range and not superseded
             z_diff_ = abs(float(left['pts'][:, 2].mean()) -
                           float(right['pts'][:, 2].mean()))
             # target_y 只限制最终选择；所有宽度合理的候选都参与占用统计，
@@ -2359,8 +2965,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                     occupancy_evidence_pts,
                     left['x_face'], right['x_face'],
                     pass_z[0], pass_z[1])
-                decision_coverage = occupancy['upper_coverage']
-                decision_density = occupancy['upper_density']
+                decision_coverage = occupancy['check_coverage']
+                decision_density = occupancy['check_density']
             elif width_in_range:
                 measured_occupancy = _measure_pair_occupancy(
                     occupancy_evidence_pts,
@@ -2370,10 +2976,10 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                     'density': measured_occupancy[1],
                     'count': measured_occupancy[2],
                     'bins': measured_occupancy[3],
-                    'upper_coverage': measured_occupancy[0],
-                    'upper_density': measured_occupancy[1],
-                    'upper_count': measured_occupancy[2],
-                    'upper_bins': measured_occupancy[3],
+                    'check_coverage': measured_occupancy[0],
+                    'check_density': measured_occupancy[1],
+                    'check_count': measured_occupancy[2],
+                    'check_bins': measured_occupancy[3],
                     'row_coverages': (),
                 }
                 decision_coverage = occupancy['coverage']
@@ -2382,8 +2988,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 occupancy = {
                     'coverage': 0.0, 'density': 0.0,
                     'count': 0, 'bins': 0,
-                    'upper_coverage': 0.0, 'upper_density': 0.0,
-                    'upper_count': 0, 'upper_bins': 0,
+                    'check_coverage': 0.0, 'check_density': 0.0,
+                    'check_count': 0, 'check_bins': 0,
                     'row_coverages': (),
                 }
                 decision_coverage = 0.0
@@ -2399,9 +3005,12 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 row_text = ",".join(
                     f"{value * 100:.0f}%"
                     for value in occupancy['row_coverages'])
+                region = occupancy['region']
                 height_text = (
                     f" 全高={occupancy['coverage']*100:.0f}% "
-                    f"上半部={occupancy['upper_coverage']*100:.0f}% "
+                    f"自适应区={occupancy['check_coverage']*100:.0f}% "
+                    f"检查Z=[{region['z_min']:+.3f},{region['z_max']:+.3f}]m "
+                    f"底部避让={region['bottom_margin_m']*1000:.0f}mm "
                     f"分层=[{row_text}]")
             _dbg(
                 f"候选组合 k={left['k']}({len(left['pts'])}点,x={left['x_face']:+.3f}) - "
@@ -2409,11 +3018,12 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                 f"间距={gap_float:.0f}mm 允许=[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm "
                 f"z重心差={z_diff_*1000:.0f}mm{target_text} "
                 f"内部占用[{occupancy_mode}]={decision_coverage*100:.0f}%"
-                f"({occupancy['upper_count'] if height_aware_occupancy else occupancy['count']}点/"
-                f"{occupancy['upper_bins'] if height_aware_occupancy else occupancy['bins']}bin,"
+                f"({occupancy['check_count'] if height_aware_occupancy else occupancy['count']}点/"
+                f"{occupancy['check_bins'] if height_aware_occupancy else occupancy['bins']}bin,"
                 f"密度={decision_density:.0f}点/m){height_text} "
                 f"{'覆盖较高' if coverage_has_box else '低覆盖'} "
-                f"{'候选有效' if selectable else '候选无效'}")
+                f"{'候选有效' if selectable else '候选无效'}"
+                f"{'（弱侧面已由正面补边替代，仅作占用参照）' if superseded else ''}")
             if width_in_range:
                 # 有订单位置时先选最接近目标边界者；否则保持原来的宽度优先策略。
                 if target_error is not None:
@@ -2440,40 +3050,73 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
                     'occupancy': occupancy,
                 }
                 occupancy_reference_pairs.append(pair)
-                if target_in_range:
+                if selectable:
                     valid_pairs.append(pair)
 
+    occupied_target_pair_count = 0
     if valid_pairs:
         max_occupancy_coverage = max(
             item['coverage'] for item in occupancy_reference_pairs)
         max_occupancy_density = max(
             item['density'] for item in occupancy_reference_pairs)
+        # 宽度合理但位置不符的箱体区仍参与参照，不能只用目标区自己作基准。
+        reference_windows = [
+            window for item in occupancy_reference_pairs
+            for window in item['occupancy'].get('height_windows', ())
+            if window['height_reliable']
+        ]
+        max_window_coverage = max(
+            (window['coverage'] for window in reference_windows), default=0.0)
+        max_window_density = max(
+            (window['area_density'] for window in reference_windows), default=0.0)
         empty_gap_pairs = []
         for item in valid_pairs:
             has_box = _pair_contains_box(
                 item['coverage'], item['density'],
                 max_occupancy_coverage, max_occupancy_density)
+            occupied_window = _find_occupied_height_window(
+                item['occupancy'], max_window_coverage, max_window_density)
+            has_box = has_box or occupied_window is not None
             if not has_box:
                 empty_gap_pairs.append(item)
                 _dbg(
                     f"候选组合 k={item['left']['k']} - "
                     f"k={item['right']['k']} 确认为空缺口："
-                    f"{'上半部' if height_aware_occupancy else ''}"
+                    f"{'自适应区' if height_aware_occupancy else ''}"
                     f"覆盖率={item['coverage']*100:.0f}%，"
                     f"密度={item['density']:.0f}点/m，"
                     f"本帧箱体参考密度={max_occupancy_density:.0f}点/m")
             else:
+                occupied_target_pair_count += 1
                 _dbg(
                     f"候选组合 k={item['left']['k']} - "
                     f"k={item['right']['k']} 被排除："
                     f"两面之间已有箱体（"
-                    f"{'上半部' if height_aware_occupancy else ''}"
+                    f"{'自适应区' if height_aware_occupancy else ''}"
                     f"覆盖率={item['coverage']*100:.0f}%，"
                     f"密度={item['density']:.0f}点/m，"
                     f"参考密度={max_occupancy_density:.0f}点/m）")
+                if occupied_window is not None:
+                    message = (
+                        f"阶梯局部异常占用：候选 k={item['left']['k']} - "
+                        f"k={item['right']['k']}，"
+                        f"Z=[{occupied_window['z_min']:+.3f},"
+                        f"{occupied_window['z_max']:+.3f}]m，"
+                        f"覆盖率={occupied_window['coverage']*100:.0f}%，"
+                        f"点数={occupied_window['count']}，"
+                        f"实际高度跨度={occupied_window['z_span_m']*1000:.0f}mm，"
+                        f"面密度={occupied_window['area_density']:.0f}点/m²，"
+                        f"参照面密度={max_window_density:.0f}点/m²；排除此候选")
+                    _report_stair_step(message)
         valid_pairs = empty_gap_pairs
 
     if not valid_pairs:
+        if height_aware_occupancy and occupied_target_pair_count:
+            detail = (
+                f"阶梯缺口异常占用：{occupied_target_pair_count}个位置/宽度合理的候选"
+                "均未通过自适应区域复核；禁止以细支首层估算值覆盖该失败，返回 status=2")
+            _report_stair_step(detail)
+            return _failure_result(detail, allow_slim_fallback=False)
         _dbg(
             f"计算失败：{len(candidates)}个候选面中无“间距合理且两面之间为空”的缺口，"
             f"允许间距=[{min_gap_mm:.0f}, {max_gap_mm:.0f}]mm，"
@@ -2485,6 +3128,176 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
             f"[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm内的空缺口")
 
     selected = min(valid_pairs, key=lambda item: item['score'])
+
+    # 侧面聚类可能在高层吸附到缺口深处、靠层底的局部箱侧面，
+    # 导致前沿实际足够宽，但返回值进入机器人减速或停止档。只在最终候选
+    # 为双侧面测宽且余量 <=70mm 时，强制重新检测非车壁一侧的正面突变。
+    # 正面方案仍须通过订单位置、允许宽度和区间占用复核，并且按最终发送的
+    # 整数毫米判断档位。正面值只有在更宽、且比侧面值更接近检测参考宽度时
+    # 才替换；复核失败则保留原来的保守值。
+    selected_sources = {
+        selected['left'].get('source'), selected['right'].get('source')}
+    side_gap_to_send_mm = int(float(selected['gap']))
+    side_width_margin_mm = (
+        side_gap_to_send_mm - float(expected_width_mm))
+    if (selected_sources == {'normal_cluster'} and
+            side_width_margin_mm <= SIDE_WIDTH_FRONT_RECHECK_MARGIN_MM and
+            target_range is not None):
+        alarm_level = (
+            '停止档' if side_width_margin_mm < SIDE_WIDTH_STOP_MARGIN_MM
+            else '减速档')
+        _report_stair_step(
+            f"[STACK-RECHECK] 侧面测宽进入{alarm_level}："
+            f"侧面宽度={side_gap_to_send_mm}mm（发送值），"
+            f"理论抓宽={float(expected_width_mm):.0f}mm，"
+            f"余量={side_width_margin_mm:.0f}mm；"
+            "强制使用正面突变边界复算")
+
+        wall_positions = (
+            float(target_range['wall_left']),
+            float(target_range['wall_right']),
+        )
+        front_replacements = {}
+        missing_front_sides = []
+        for side_name in ('left', 'right'):
+            target_x = float(target_range[side_name])
+            target_is_wall = any(
+                abs(target_x - wall_x) <= 1e-6
+                for wall_x in wall_positions)
+            if target_is_wall:
+                continue
+            front_candidate = _detect_front_gap_edge_candidate(
+                front_gap_pts, target_range, side_name, pass_y, pass_z)
+            if front_candidate is None:
+                missing_front_sides.append(side_name)
+            else:
+                front_candidate['fallback_reason'] = 'narrow_side_recheck'
+                front_replacements[side_name] = front_candidate
+
+        if missing_front_sides:
+            _report_stair_step(
+                "[STACK-RECHECK] 正面突变复算未找到全部必需边界："
+                f"缺失={','.join(missing_front_sides)}；"
+                f"保留原侧面宽度={selected['gap']:.0f}mm")
+        elif not front_replacements:
+            _report_stair_step(
+                "[STACK-RECHECK] 订单目标两侧均为车壁，"
+                f"无可用正面突变替换的箱体边界；"
+                f"保留原侧面宽度={selected['gap']:.0f}mm")
+        else:
+            front_left = front_replacements.get('left', selected['left'])
+            front_right = front_replacements.get('right', selected['right'])
+            front_gap_float = (
+                float(front_right['x_face']) - float(front_left['x_face'])) * 1000.0
+            front_gap_to_send_mm = int(front_gap_float)
+            side_reference_error_mm = abs(
+                side_gap_to_send_mm - float(detection_width_mm))
+            front_reference_error_mm = abs(
+                front_gap_to_send_mm - float(detection_width_mm))
+            front_is_wider = front_gap_to_send_mm > side_gap_to_send_mm
+            front_is_closer_to_reference = (
+                front_reference_error_mm < side_reference_error_mm)
+            front_left_error = abs(
+                float(front_left['x_face']) - float(target_range['left']))
+            front_right_error = abs(
+                float(front_right['x_face']) - float(target_range['right']))
+            front_geometry_valid = (
+                min_gap_mm <= front_gap_float <= max_gap_mm and
+                front_left_error <= ORDER_TARGET_PAIR_EDGE_M and
+                front_right_error <= ORDER_TARGET_PAIR_EDGE_M)
+
+            if height_aware_occupancy and front_geometry_valid:
+                front_occupancy = _measure_pair_occupancy_by_height(
+                    occupancy_evidence_pts,
+                    front_left['x_face'], front_right['x_face'],
+                    pass_z[0], pass_z[1])
+                front_coverage = front_occupancy['check_coverage']
+                front_density = front_occupancy['check_density']
+            elif front_geometry_valid:
+                front_measured_occupancy = _measure_pair_occupancy(
+                    occupancy_evidence_pts,
+                    front_left['x_face'], front_right['x_face'])
+                front_occupancy = {
+                    'coverage': front_measured_occupancy[0],
+                    'density': front_measured_occupancy[1],
+                    'count': front_measured_occupancy[2],
+                    'bins': front_measured_occupancy[3],
+                    'check_coverage': front_measured_occupancy[0],
+                    'check_density': front_measured_occupancy[1],
+                    'check_count': front_measured_occupancy[2],
+                    'check_bins': front_measured_occupancy[3],
+                    'row_coverages': (),
+                }
+                front_coverage = front_occupancy['coverage']
+                front_density = front_occupancy['density']
+            else:
+                front_occupancy = None
+                front_coverage = 0.0
+                front_density = 0.0
+
+            front_has_box = True
+            occupied_front_window = None
+            if front_geometry_valid:
+                front_has_box = _pair_contains_box(
+                    front_coverage, front_density,
+                    max_occupancy_coverage, max_occupancy_density)
+                if height_aware_occupancy:
+                    occupied_front_window = _find_occupied_height_window(
+                        front_occupancy,
+                        max_window_coverage, max_window_density)
+                    front_has_box = (
+                        front_has_box or occupied_front_window is not None)
+
+            if (front_geometry_valid and not front_has_box and
+                    front_is_wider and front_is_closer_to_reference):
+                selected = {
+                    'score': selected['score'],
+                    'left': front_left,
+                    'right': front_right,
+                    'gap': front_gap_float,
+                    'z_diff': abs(
+                        float(front_left['pts'][:, 2].mean()) -
+                        float(front_right['pts'][:, 2].mean())),
+                    'coverage': front_coverage,
+                    'density': front_density,
+                    'occupancy': front_occupancy,
+                }
+                _report_stair_step(
+                    "[STACK-RECHECK] 正面突变复算通过："
+                    f"边界=[{float(front_left['x_face']):+.3f},"
+                    f"{float(front_right['x_face']):+.3f}]m，"
+                    f"正面宽度={front_gap_to_send_mm}mm（发送值），"
+                    f"比侧面宽度增加="
+                    f"{front_gap_to_send_mm - side_gap_to_send_mm}mm，"
+                    f"检测参考偏差={front_reference_error_mm:.0f}mm"
+                    f"（侧面偏差={side_reference_error_mm:.0f}mm），"
+                    f"内部占用={front_coverage * 100:.0f}%；"
+                    "最终采用较宽的正面复算结果")
+            else:
+                reasons = []
+                if not front_geometry_valid:
+                    reasons.append(
+                        f"位置/宽度不合法({front_gap_float:.0f}mm)")
+                if front_geometry_valid and front_has_box:
+                    reasons.append(
+                        f"内部有占用({front_coverage * 100:.0f}%)")
+                if (front_geometry_valid and not front_has_box and
+                        not front_is_wider):
+                    reasons.append(
+                        f"发送值未宽于侧面结果({front_gap_to_send_mm}<="
+                        f"{side_gap_to_send_mm}mm)")
+                if (front_geometry_valid and not front_has_box and
+                        front_is_wider and
+                        not front_is_closer_to_reference):
+                    reasons.append(
+                        f"未更接近检测参考宽度"
+                        f"(正面偏差={front_reference_error_mm:.0f}mm>="
+                        f"侧面偏差={side_reference_error_mm:.0f}mm)")
+                _report_stair_step(
+                    "[STACK-RECHECK] 正面突变复算未采用："
+                    f"{'；'.join(reasons)}；"
+                    f"保留原侧面宽度={selected['gap']:.0f}mm")
+
     left = selected['left']
     right = selected['right']
     gap_float = selected['gap']
@@ -2496,6 +3309,8 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
     lc, rc = left['pts'], right['pts']
     x_left_face, x_right_face = left['x_face'], right['x_face']
     gap_mm = int(gap_float)
+    _report_stair_step(_format_width_method(
+        left, right, gap_mm, expected_width_mm))
     _dbg(
         f"最终选中候选面 k={left_k}({len(lc)}点,x={x_left_face:+.3f}) - "
         f"k={right_k}({len(rc)}点,x={x_right_face:+.3f})  "
@@ -2503,17 +3318,18 @@ def _compute_width(pc1, pc2, view=None, yaw_offset_deg=0.0,
         f"理论抓宽={float(expected_width_mm):.0f}mm "
         f"允许=[{min_gap_mm:.0f},{max_gap_mm:.0f}]mm z重心差={z_diff*1000:.0f}mm "
         f"内部占用[{occupancy_mode}]="
-        f"{'上半部' if height_aware_occupancy else ''}{selected_coverage*100:.0f}% "
+        f"{'自适应区' if height_aware_occupancy else ''}{selected_coverage*100:.0f}% "
         f"(全高={selected_occupancy['coverage']*100:.0f}%) "
         f"密度={selected_density:.0f}点/m")
-    if (height_aware_occupancy and
-            selected_occupancy['coverage'] >= PAIR_OCCUPANCY_MIN_COVERAGE and
-            selected_occupancy['upper_coverage'] < PAIR_OCCUPANCY_MIN_COVERAGE):
+    if height_aware_occupancy:
+        region = selected_occupancy['region']
         _report_stair_step(
             f"阶梯缺口复核通过：检测目标Y={float(detection_target_y_mm):.0f}mm，"
             f"候选X=[{x_left_face:+.3f},{x_right_face:+.3f}]m，"
             f"全高占用={selected_occupancy['coverage']*100:.0f}%，"
-            f"上半部占用={selected_occupancy['upper_coverage']*100:.0f}%，"
+            f"自适应区占用={selected_occupancy['check_coverage']*100:.0f}%，"
+            f"检查Z=[{region['z_min']:+.3f},{region['z_max']:+.3f}]m，"
+            f"底部避让={region['bottom_margin_m']*1000:.0f}mm，局部高度窗口复核通过，"
             f"测量宽度={gap_mm}mm，返回 status=1")
 
     clusters = {
@@ -2598,7 +3414,7 @@ def check_stacking(length, pc1, pc2, tolerance=50, yaw_offset_deg=0.0,
     detection_width_mm / detection_target_y_mm: 仅供点云候选筛选使用的
                   真实缺口宽度和起点；机器人报文仍使用length和最终测量值。
     stair_step_mode: 混装阶梯缺口模式；在通用订单位置约束之外，额外支持缺失
-                     边界补偿，并用目标箱高上半部占用率代替全高一维占用率。
+                     边界补偿，并按宽高比自适应检查区及局部高度窗口复核占用。
     view: 在线默认 False，避免2D/3D交互窗口阻塞机器人状态返回；离线可显式开启。
     """
     return _compute_width(pc1, pc2, view=view, yaw_offset_deg=yaw_offset_deg,
@@ -2695,7 +3511,7 @@ if __name__ == '__main__':
     DEBUG = True   # 离线测试：打开调试打印
 
     # ↓ 只填文件名即可，目录自动使用 _DEFAULT_SAVE_DIR；留空则自动选取最新文件
-    _FILENAME = 'merged_20260826_/merged_20260826_161134.pcd'
+    _FILENAME = 'merged_20260904/merged_20260904_185735.pcd'
 
     args = sys.argv[1:]
     if _FILENAME:
@@ -2724,19 +3540,19 @@ if __name__ == '__main__':
     # 细支箱离线回放使用与 robot_process_node 相同的补偿角：-56.6 - (-60.5) = +3.9°。
     measured = _compute_width(
         pcd, empty,
-        yaw_offset_deg=7.4,
+        yaw_offset_deg=3.9,
         view=True,
-        rel_top_h=0.585,
-        box_h=0.585,
-        expected_width_mm=750,
-        box_width_mm=250,
-        box_type=103,
-        target_y_mm=698.55,
-        car_width_mm=2459,
+        rel_top_h=0.596,
+        box_h=0.298,
+        expected_width_mm=1132,
+        box_width_mm=283,
+        box_type=202,
+        target_y_mm=592.6,
+        car_width_mm=2970,
         stair_step_mode=False,
-        detection_width_mm=885.85,
-        detection_target_y_mm=573.15,
-    )  # 离线回放显式开启可视化
+        detection_width_mm=1232.8,
+        detection_target_y_mm=585.6,
+    )
     if measured is None:
         print('\n检测状态: status=2（倾斜异常或宽度计算失败）')
     else:

@@ -32,7 +32,7 @@ MENU = """
 │  2. get_per_count 请求当前面抓数等信息       │
 │  3. get_box       请求来料配方             │
 │  4. get_path      请求放置路径             │
-│  5. chk_path      批量检查路径             │
+│  5. chk_path      批量检查后自动断开         │
 │  6. stacking      触发堆叠检测             │
 │  9. 断开连接                              │
 │  q. 退出                                 │
@@ -73,39 +73,36 @@ def parse_path_block(block):
 
 
 def handle_get_pallet(sock):
-    """请求并打印总体信息以及混装/异形车头 block 位置。"""
+    """请求总体信息，合并第3、4块各自前三个float中的混装block序号。"""
     sock.sendall(CMD_GET_PALLET)
     n, blocks = recv_response(sock)
-    f0 = parse_floats(blocks[0], 5)
+    f0 = parse_floats(blocks[0], 3)
     f1 = parse_floats(blocks[1], 3)
     print(
         f"  总箱数={int(f0[0])}  码垛面数={int(f0[1])}  "
-        f"车宽={f0[2]:.0f}mm  head.W={f0[3]:.0f}mm  "
-        f"head.L={f0[4]:.0f}mm  frame.W={f0[5]:.0f}mm"
+        f"车宽(min尾门/车厢)={f0[2]:.0f}mm"
     )
     print(f"  箱尺寸 L={f1[0]:.0f} W={f1[1]:.0f} H={f1[2]:.0f}")
     if n >= 3:
         mixture_positions = [
-            int(position) for position in parse_floats(blocks[2], 6)
+            int(position)
+            for block in blocks[2:4]
+            for position in parse_floats(block, 3)
             if position > 0
         ]
         print(f"  混装 block 位置={mixture_positions or '无'}")
-    if n >= 4:
-        head_positions = [
-            int(position) for position in parse_floats(blocks[3], 6)
-            if position > 0
-        ]
-        print(f"  异形车头 block 位置={head_positions or '无'}")
 
 
 def handle_get_per_count(sock):
-    """请求并打印当前面信息及异形车头角点单侧收缩量。"""
+    """读取第1块的当前面信息、第2块首个float的角点单侧收缩量。"""
     sock.sendall(CMD_GET_PER_COUNT)
     _, blocks = recv_response(sock)
-    f = parse_floats(blocks[0], 4)
+    f = parse_floats(blocks[0], 3)
+    corner_shrink_mm = parse_floats(blocks[1], 1)[0]
     print(
         f"  本面总抓数={int(f[0])}  当前抓箱型={int(f[1])}  "
-        f"P1底层单行抓数={int(f[2])}  角点单侧收缩={f[3]:.1f}mm")
+        f"P1底层单行抓数={int(f[2])}  "
+        f"角点单侧收缩={corner_shrink_mm:.1f}mm")
 
 
 def handle_get_box(sock):
@@ -224,6 +221,13 @@ def run(host, port):
                 sock = None
             except Exception as e:
                 print(f"  [错误] {e}")
+            finally:
+                # cmd_chk_path 是一次性前置检查。结果返回（或检查异常）后主动
+                # 释放连接，便于真实机器人或下一次模拟检查重新接入服务端。
+                if choice == '5' and sock is not None:
+                    sock.close()
+                    sock = None
+                    print("  chk_path 已结束，自动断开连接")
 
         else:
             print("  无效选项，请重新输入")

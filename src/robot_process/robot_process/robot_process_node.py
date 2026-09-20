@@ -24,7 +24,13 @@ from rrt_env.fanuc_kinematics import FanucKinematics, make_uf_transform
 from auxiliary_methods.search_space import SearchSpace
 from socket_pkg.socket_server import SocketApp
 from socket_pkg import socket_client
-from stacking_detection.stacking_detection_node import collect_dual_lidar_once, check_stacking, save_point_clouds
+from stacking_detection.stacking_detection_node import (
+    activate_wall_face,
+    collect_dual_lidar_once,
+    check_stacking,
+    reset_wall_cache,
+    save_point_clouds,
+)
 from grpc_pkg.grpc_server import GrpcServer
 from auxiliary_methods.plotting import (
     Plot, resolve_output_dir, save_face_layout,
@@ -160,6 +166,27 @@ def _find_head_block_positions(rp_list) -> list[int]:
         index for index, item in enumerate(rp_list, start=1)
         if item.is_head
     ]
+
+
+def _log_door_face_layouts(rp_list, logger, prefix='DOOR'):
+    """记录仅由梯形垛Isdoor=true触发的尾门面Y偏移。"""
+    for block_index, rp_item in enumerate(rp_list, start=1):
+        for layout in getattr(rp_item, 'door_face_layouts', []):
+            logger.info(
+                f"[{prefix}] Isdoor=true尾门面触发，"
+                f"Block {block_index} 面{layout['face']}："
+                f"尾门宽={layout['door_width']:.1f}mm，"
+                f"整面宽={layout['face_width']:.1f}mm，"
+                f"几何居中偏移={layout['centered_offset']:.1f}mm，"
+                f"扣除右侧100mm后计算偏移="
+                f"{layout.get('formula_offset', layout['applied_offset']):.1f}mm，"
+                f"实际最终Y偏移={layout['applied_offset']:.1f}mm，"
+                f"最终Y范围=[{layout['shifted_left']:.1f}, "
+                f"{layout['shifted_right']:.1f}]mm，"
+                f"左侧余量={layout['left_clearance']:.1f}mm，"
+                f"右侧余量={layout['right_clearance']:.1f}mm，"
+                f"右侧要求>={layout['min_right_clearance']:.1f}mm，"
+                f"处理结果={layout['decision']}")
 
 
 def _action_car_width(action, rp) -> float:
@@ -469,6 +496,7 @@ def _save_parsed_order(config_rp, rp_list, source='online', raw_order=None):
             'block': block_index,
             'block_type': rp_item.block_type,
             'is_head': bool(rp_item.is_head),
+            'conveyor_left_transfer_enable': rp_item.conveyor_left_transfer_enable,
             'box_types': list(rp_item.box_configs.keys()),
             'box_count': int(rp_item.box_count),
             'grab_count': len(actions),
@@ -867,19 +895,54 @@ def _validate_order_alignment(rp_list, config_rp=None):
     }
 
 
+def _order_validation_detail_lines(validation):
+    """把垛序校验结果整理为可直接写入日志的原因明细。"""
+    lines = [str(issue) for issue in validation.get('issues', [])]
+    lines.append(
+        f'统计：总抓数={validation.get("total_grabs", 0)}，'
+        f'路径总箱数={validation.get("total_boxes", 0)}，'
+        f'Index.Ns={validation.get("declared_ns")}')
+
+    for block in validation.get('blocks', []):
+        lines.append(
+            f'Block {block.get("block")}({block.get("block_type", "unknown")})：'
+            f'get_path={block.get("path_grabs", 0)}抓，'
+            f'get_box={block.get("box_grabs", 0)}抓，'
+            f'实际箱数={block.get("box_count", 0)}，'
+            f'Block声明箱数={block.get("declared_box_count", 0)}')
+
+    for mismatch in validation.get('mismatch_grabs', []):
+        location = (
+            f'Block {mismatch.get("block")} / '
+            f'第 {mismatch.get("grab")} 抓 '
+            f'(action_id={mismatch.get("action_id")})')
+        fields = mismatch.get('fields', [])
+        if not fields:
+            lines.append(f'{location}：字段不一致（无明细）')
+            continue
+        for field in fields:
+            lines.append(
+                f'{location}：{field.get("field")} 不一致，'
+                f'get_path={field.get("get_path")!r}，'
+                f'get_box={field.get("get_box")!r}')
+    return lines
+
+
 def _validate_plc_indices(rp_list, special_ind):
     """按垛序箱序号校验 PLC 的 BoxP3Ind 与 BoxRightInd。
 
     ``BoxP3Ind`` 实际表示“不翻转”：1XX 的 P3，以及 2XX/3XX 的
-    P1/P3。``BoxRightInd`` 只需记录仍可能右翻的 1XX P1 行内最右抓；
-    混装 block 与尾料/尾门简单行不参与最右抓判断。尾料/尾门 P1
-    只是“不右翻”，不会因此归入 ``BoxP3Ind``；其动作本身若为常规箱
-    P3，仍按 1XX-P3 规则加入 ``BoxP3Ind``。
+    P1/P3。``BoxRightInd`` 只记录预期 ``area_cfg`` 个位为 3 的
+    1XX-P1 抓，使 PLC 校验与 cmd_get_box 的右翻语义保持一致。
+    因此异形车头三抓行最右抓（area_cfg=1）不会被误加入；
+    普通两抓收尾的 area_cfg=13 仍会正常加入。混装 block 与
+    尾料/尾门简单行不参与最右抓判断。
     """
     action_records = []
     next_box_id = 1
     for block_index, rp_item in enumerate(rp_list, start=1):
         actions = [item for item in rp_item.ori_offsets if item != 'done']
+        expected_area_cfg = _expected_area_cfg_map(rp_item)
         boxes_by_id = {
             int(box['id']): box for box in rp_item.boxes if 'id' in box
         }
@@ -894,31 +957,9 @@ def _validate_plc_indices(rp_list, special_ind):
                 'action': action,
                 'box_ids': box_ids,
                 'is_tail': bool(box.get('is_tail', False)),
+                'expected_area_cfg': int(expected_area_cfg.get(
+                    int(action['id']), 1)),
             })
-
-    # 规则/梯形垛中，同面、同高度、同箱型的 P1 行至少有两抓时，Y 最大
-    # 的那一抓是最右抓。混装面以及统一靠左、无需右翻的尾料/尾门简单行
-    # 不做该推断；这里仅影响 BoxRightInd，不会排除尾门区域的 1XX-P3。
-    row_groups = {}
-    for record in action_records:
-        action = record['action']
-        box_prefix = str(action.get('box_type', ''))[:1]
-        if (record['block_type'] == 'mixture' or record['is_tail']
-                or box_prefix != '1' or action['area'] != 'p1'):
-            continue
-        key = (
-            record['block'], int(action['num_F']),
-            round(float(action['pos'][2]), 4),
-            str(action.get('box_type', '')),
-        )
-        row_groups.setdefault(key, []).append(record)
-    right_record_keys = set()
-    for records in row_groups.values():
-        if len(records) < 2:
-            continue
-        rightmost = max(records, key=lambda item: float(item['action']['pos'][1]))
-        right_record_keys.add(
-            (rightmost['block'], int(rightmost['action']['id'])))
 
     expected_p3 = []
     expected_right = []
@@ -929,7 +970,11 @@ def _validate_plc_indices(rp_list, special_ind):
                 or (prefix in ('2', '3')
                     and action['area'] in ('p1', 'p3'))):
             expected_p3.extend(record['box_ids'])
-        if ((record['block'], int(action['id'])) in right_record_keys):
+        if (record['block_type'] != 'mixture'
+                and not record['is_tail']
+                and prefix == '1'
+                and action['area'] == 'p1'
+                and record['expected_area_cfg'] % 10 == 3):
             expected_right.extend(record['box_ids'])
 
     if special_ind is None:
@@ -1091,13 +1136,8 @@ def _write_chk_path_summary(session):
     if not order_validation.get('passed'):
         lines.append('垛序异常:')
         lines.extend(
-            f'  {issue}' for issue in order_validation.get('issues', []))
-        for mismatch in order_validation.get('mismatch_grabs', []):
-            field_names = ', '.join(
-                field['field'] for field in mismatch.get('fields', []))
-            lines.append(
-                f'  Block {mismatch["block"]} / 第 {mismatch["grab"]} 抓 '
-                f'(action_id={mismatch["action_id"]}): {field_names}')
+            f'  {detail}'
+            for detail in _order_validation_detail_lines(order_validation))
     else:
         lines.append(
             f'垛序检查: 通过（{order_validation.get("total_grabs", 0)}抓 / '
@@ -1630,10 +1670,19 @@ def main():
         reserve_grip = config_be['reserve_grip']
         off_line_mode = config_be['off_line_mode']
         show_env = config_be['show_env']
+        conveyor_left_transfer_enable = config_be.get(
+            'conveyor_left_transfer_enable', True)
+        if not isinstance(conveyor_left_transfer_enable, bool):
+            raise ValueError('conveyor_left_transfer_enable 必须为 true/false')
     except Exception as e:
         logs.error(f"读取参数文件失败,请检查项目根目录config.json文件: {e}")
         sys.exit(1)
-    logs.info("读取参数文件成功！")
+    logs.info(f"读取参数文件成功：{_cfg_path}")
+    logs.info(
+        f"输送线左移栽开关={'开启' if conveyor_left_transfer_enable else '关闭'}；"
+        + ("符合条件的非尾门1XX-P1九箱三抓行，最右抓来料数量加20"
+           if conveyor_left_transfer_enable else "来料数量不使用+20编码")
+        + "；配置修改后需重启生效")
     # 运动学辅助（可选）：验证路径点是否接近奇异/超关节限位
     # 启用方式：config.json 中添加 "use_kinematics": true
     # User Frame 配置：config.json 中添加 "kin_uf_offset": [x, y, z, rx_deg, ry_deg, rz_deg]
@@ -1653,6 +1702,9 @@ def main():
         if (resume_save or resume_on_restart) else None
     # 主循环
     while True:
+        # 车壁坐标只允许在同一订单内复用；进入下一订单（或续传重新启动）前清空，
+        # 防止相同车宽的下一辆车继承上一辆车的点云位置。
+        reset_wall_cache()
         raw_order = None
         # 断点续传：有未完成进度则跳过等待垛型，直接用磁盘保存的计划恢复
         resume_data = store.load() if (store and not off_line_mode and resume_on_restart) else None
@@ -1705,7 +1757,9 @@ def main():
         logs.info("码垛环境初始化成功！")
         # 计算垛序（逐 block 生成，保留各自 rp 对象）
         try:
-            rp_list = build_robot_positions(config_rp)
+            rp_list = build_robot_positions(
+                config_rp,
+                conveyor_left_transfer_enable=conveyor_left_transfer_enable)
             mixture_block_positions = _find_mixture_block_positions(rp_list)
             head_block_positions = _find_head_block_positions(rp_list)
             # 最后一个 block 的末条目 action 升为 3（全部结束），其余 block 末条目保持 2（block 结束）
@@ -1716,6 +1770,7 @@ def main():
                 f"计算垛序成功！共 {len(rp_list)} 个 block，"
                 f"混装 block 位置={mixture_block_positions or '无'}，"
                 f"异形车头 block 位置={head_block_positions or '无'}")
+            _log_door_face_layouts(rp_list, logs)
             for block_index, rp_item in enumerate(rp_list, start=1):
                 for face_number, geometry in sorted(
                         rp_item.head_face_geometry.items()):
@@ -1724,7 +1779,9 @@ def main():
                     logs.info(
                         f"[HEAD] Block {block_index} 面{face_number}: "
                         f"累计纵深={geometry['depth_x']:.1f}mm，"
-                        f"当前面占用纵深={geometry['face_depth']:.1f}mm，"
+                        f"箱长={geometry.get('box_depth', geometry['face_depth']):.1f}mm，"
+                        f"面间余量={geometry.get('depth_margin', 0.0):.1f}mm，"
+                        f"当前面计算纵深={geometry['face_depth']:.1f}mm，"
                         f"当前可用车宽={geometry['car_width']:.1f}mm，"
                         f"识别来源={geometry['source']}")
         except Exception as e:
@@ -1768,6 +1825,8 @@ def main():
         # 会提前切到下一 block，cmd_stacking 仍应使用上一抓的订单位置信息。
         last_grab_car_width = None
         last_grab_block_type = None
+        # 车壁缓存按 block+面隔离；下一面不能直接复用上一面坐标。
+        last_grab_face_key = None
         # 当前抓下发前的真实侧向缺口，仅用于点云候选筛选。
         # 机器人报文中的理论抓宽仍由箱数×单箱宽计算，不使用此值。
         last_grab_detection_gap = None
@@ -1780,6 +1839,7 @@ def main():
             nonlocal rp_list, rp_idx, rp, be
             nonlocal last_grab_action, last_grab_box_type
             nonlocal last_grab_car_width, last_grab_block_type
+            nonlocal last_grab_face_key
             nonlocal last_grab_detection_gap, cur_box_id, cur_path_id
             state = session.get('_runtime_state') if session else None
             if state is None:
@@ -1792,6 +1852,7 @@ def main():
             last_grab_box_type = state['last_grab_box_type']
             last_grab_car_width = state['last_grab_car_width']
             last_grab_block_type = state['last_grab_block_type']
+            last_grab_face_key = state['last_grab_face_key']
             last_grab_detection_gap = state['last_grab_detection_gap']
             cur_box_id = state['cur_box_id']
             cur_path_id = state['cur_path_id']
@@ -1861,7 +1922,13 @@ def main():
                 last_grab_car_width = _action_car_width(
                     last_grab_action, rp)
                 last_grab_block_type = rp.block_type
+                last_grab_face_key = (
+                    rp_idx + 1, int(last_grab_action['num_F']))
             logs.warning("===== 断点续传待确认 =====")
+            logs.warning(
+                "断点续传按当前配置重建来料编码：输送线左移栽="
+                f"{'开启' if conveyor_left_transfer_enable else '关闭'}；"
+                "请核对输送线实际模式及已下发来料")
             logs.warning(f"将从 block {rp_idx + 1}/{len(rp_list)} 继续，"
                          f"已完成至 box_id≤{cur_box_id}, path_id≤{cur_path_id}")
             logs.warning("请核对机器人当前实际已码位置（可能与服务端相差最多 1 抓）。")
@@ -1913,6 +1980,7 @@ def main():
                                 'last_grab_box_type': last_grab_box_type,
                                 'last_grab_car_width': last_grab_car_width,
                                 'last_grab_block_type': last_grab_block_type,
+                                'last_grab_face_key': last_grab_face_key,
                                 'last_grab_detection_gap': last_grab_detection_gap,
                                 'cur_box_id': cur_box_id,
                                 'cur_path_id': cur_path_id,
@@ -1928,7 +1996,11 @@ def main():
                             _attach_chk_path_log(chk_session, logs)
                             chk_session['mixture_fields'] = \
                                 _collect_mixture_fields(config_rp)
-                            _chk_rp_list = build_robot_positions(config_rp)
+                            _chk_rp_list = build_robot_positions(
+                                config_rp,
+                                conveyor_left_transfer_enable=conveyor_left_transfer_enable)
+                            _log_door_face_layouts(
+                                _chk_rp_list, logs, prefix='CHK-DOOR')
                             _chk_rp_list[-1].boxes[-1]['action'] = 3
                             _chk_last_offset = next(
                                 item for item in reversed(
@@ -1938,6 +2010,20 @@ def main():
                             chk_session['order_validation'] = \
                                 _validate_order_alignment(
                                     _chk_rp_list, config_rp=config_rp)
+                            if not chk_session['order_validation'].get(
+                                    'passed', False):
+                                logs.warning(
+                                    '[CHK-ORDER] 垛序校验失败，原因如下：')
+                                for _order_detail in \
+                                        _order_validation_detail_lines(
+                                            chk_session['order_validation']):
+                                    logs.warning(
+                                        f'[CHK-ORDER] {_order_detail}')
+                            else:
+                                logs.info(
+                                    '[CHK-ORDER] 垛序校验通过：'
+                                    f'{chk_session["order_validation"].get("total_grabs", 0)}抓 / '
+                                    f'{chk_session["order_validation"].get("total_boxes", 0)}箱')
                             chk_session['plc_validation'] = _validate_plc_indices(
                                 _chk_rp_list, _get_special_ind(config_rp))
 
@@ -1950,6 +2036,7 @@ def main():
                             last_grab_box_type = None
                             last_grab_car_width = None
                             last_grab_block_type = None
+                            last_grab_face_key = None
                             last_grab_detection_gap = None
                             cur_box_id = cur_path_id = 0
                             chk_value = len(rp.robot_offsets) - 1
@@ -1986,13 +2073,14 @@ def main():
                     mes_hex = cmd_get_path
                 if mes_hex == cmd_get_pallet:
                     # 返回机器人（固定4块）：
-                    #   第1块float[0:6]：当前block总箱数、面数、车厢宽度、
-                    #                     head.W、head.L、尾门门框frame.W
-                    #                     （尺寸单位均为mm，数量除外）；
+                    #   第1块float[0:3]：当前block总箱数、面数、发送车宽；
+                    #                     发送车宽=min(尾门门框frame.W, 车厢rp.W)，单位mm。
+                    #                     float[3:9]保留补0，不再发送head.W/head.L/frame.W；
                     #   第2块float[0:3]：当前block默认箱型的有效L/W/H（mm）；
-                    #   第3块float[0:6]：前6个混装block在rp_list中的1起始序号，
-                    #                     不存在或不足6个的位置补0；
-                    #   第4块float[0:6]：前6个异形车头block的1起始序号，补0规则相同。
+                    #   第3块float[0:3]：混装block序号列表的前3项；
+                    #   第4块float[0:3]：混装block序号列表的第4～6项。
+                    #                     序号为rp_list中的1起始位置，不足6项补0；
+                    #                     各块float[3:9]保留补0，不再发送异形车头block序号。
                     mixture_positions_to_send = mixture_block_positions[:6]
                     mixture_position_slots = [
                         float(position) for position in mixture_positions_to_send
@@ -2004,49 +2092,38 @@ def main():
                             f'混装 block 共 {len(mixture_block_positions)} 个，'
                             f'cmd_get_pallet 仅发送前6个：'
                             f'{mixture_positions_to_send}')
-                    head_positions_to_send = head_block_positions[:6]
-                    head_position_slots = [
-                        float(position) for position in head_positions_to_send
-                    ]
-                    head_position_slots.extend(
-                        [0.0] * (6 - len(head_position_slots)))
-                    if len(head_block_positions) > 6:
-                        logs.warning(
-                            f'异形车头 block 共 {len(head_block_positions)} 个，'
-                            f'cmd_get_pallet 仅发送前6个：'
-                            f'{head_positions_to_send}')
+                    pallet_width_mm = min(float(rp.frame['W']), float(rp.W))
                     payload = (
                         _data_block(
-                            rp.box_count, rp.ori_offsets[-2]['num_F'], rp.W,
-                            rp.head['W'], rp.head['L'], rp.frame['W'])
+                            rp.box_count, rp.ori_offsets[-2]['num_F'],
+                            pallet_width_mm)
                         + _data_block(rp.l, rp.w, rp.h)
-                        + _data_block(*mixture_position_slots)
-                        + _data_block(*head_position_slots)
+                        + _data_block(*mixture_position_slots[:3])
+                        + _data_block(*mixture_position_slots[3:6])
                         + b'\x00\x00'
                     )
                     server.send_message(_build_msg(4, payload))
                     floor_n = rp.ori_offsets[-2]['num_F']
                     logs.debug(
                         f'总箱数: {rp.box_count}, 码垛面数：{floor_n}, '
-                        f'车厢宽度：{round(rp.W, 2)}, '
-                        f'异形车头前端宽度：{round(rp.head["W"], 2)}, '
-                        f'异形车头长度：{round(rp.head["L"], 2)}, '
+                        f'发送车宽：{round(pallet_width_mm, 2)}, '
+                        f'原车厢宽度：{round(rp.W, 2)}, '
                         f'尾门门框宽度：{round(rp.frame["W"], 2)}, '
                         f'箱子尺寸：长{rp.l} 宽{rp.w} 高{rp.h}, '
-                        f'混装 block 位置：{mixture_block_positions or "无"}, '
-                        f'异形车头 block 位置：{head_block_positions or "无"}')
+                        f'发送混装 block 位置：{mixture_positions_to_send or "无"}')
                 elif mes_hex == cmd_get_per_count:
-                    # 返回机器人（固定1个数据块，未使用的float槽位补0）：
+                    # 返回机器人（固定2个数据块，未使用的float槽位补0）：
                     #   第1块float[0]：当前面总放置抓数；统计ori_offsets中与
                     #                     当前boxes[0].num_F同面的全部P1/P2/P3动作。
                     #   第1块float[1]：当前待取抓的箱型代号；混装面取
                     #                     boxes[0].box_type，因此同一面内可随抓变化。
                     #   第1块float[2]：当前面P1最低层的单行抓数；不是单行箱数，
                     #                     当前面没有P1动作或来料队列为空时发送1。
-                    #   第1块float[3]：异形车头左右角点各自向内收缩的距离(mm)，
+                    #   第1块float[3:9]：保留，固定补0。
+                    #   第2块float[0]：异形车头左右角点各自向内收缩的距离(mm)，
                     #                     算式为(original.W-当前面有效车宽)/2；
                     #                     普通区域、超过异形区域或无当前面时发送0。
-                    #   第1块float[4:9]：保留，固定补0。
+                    #   第2块float[1:9]：保留，固定补0。
                     # 当前面优先取本命令正在读取的boxes[0]；boxes队列为空时，
                     # 仅角点收缩的面信息回退到下一条未执行路径，而总抓数和
                     # P1最低层单行抓数按现有兼容规则发送1。重复请求不会推进
@@ -2080,10 +2157,14 @@ def main():
                     _face_box_type = (
                         _current_face.get('box_type', rp.box_type)
                         if _current_face is not None else rp.box_type)
-                    server.send_message(_build_msg(1, _data_block(
-                        float(pallet_cnt), float(_face_box_type),
-                        float(_n_per_row), float(corner_shrink_mm)
-                    ) + b'\x00\x00'))
+                    payload = (
+                        _data_block(
+                            float(pallet_cnt), float(_face_box_type),
+                            float(_n_per_row))
+                        + _data_block(float(corner_shrink_mm))
+                        + b'\x00\x00'
+                    )
+                    server.send_message(_build_msg(2, payload))
                     logs.debug(
                         f'单面码垛放置次数：{pallet_cnt}，'
                         f'每行抓数={_n_per_row}，'
@@ -2093,8 +2174,9 @@ def main():
                     # 返回机器人（固定2块）：
                     #   第1块float[0:3]：来料配方号box_cfg、箱型box_type、位置码area_cfg；
                     #   第2块float[0:3]：当前抓箱型的有效L/W/H（mm）。
-                    # box_cfg数量编码：非混装1XX-P1三抓行的物理最右抓=实际箱数+20；
-                    # 20x/30x任意区域及10x-P3=实际箱数+10；其余=实际箱数。
+                    # box_cfg数量编码：输送线左移栽开启，且非混装、非尾门
+                    # 1XX-P1一行9箱分3抓时，最右抓=实际箱数+20；20x/30x任意区域及10x-P3=
+                    # 实际箱数+10；其余=实际箱数。
                     if not rp.boxes:
                         logs.warning("boxes 队列已空，无更多来料配方可发（请重连并重发垛型）")
                         continue
@@ -2159,6 +2241,8 @@ def main():
                     action_p1_right_wall = _action_p1_right_wall(action, rp)
                     last_grab_car_width = action_car_width
                     last_grab_block_type = rp.block_type
+                    last_grab_face_key = (
+                        rp_idx + 1, int(action['num_F']))
                     last_grab_detection_gap = None
                     # 断点续传：先存游标后发送（在计算/发送路径之前落盘）
                     cur_path_id = action['id']
@@ -2914,10 +2998,13 @@ def main():
                         _rel_top_h = None    # 当前行顶面距地板高度(米)，供测宽锁定当前行 Z
                         _box_h_m = None      # 当前抓箱子竖向高度(米)
                         _single_box_width = None  # 当前姿态下单箱沿垛面宽度方向的尺寸(mm)
-                        _target_y_mm = None  # 当前抓订单车宽方向起点，供混装阶梯缺口定位
+                        # target_y传给垛面检测时使用“提取车壁坐标系”。普通面与
+                        # 码垛坐标一致；异形车头需叠加左右对称收缩产生的单侧偏移。
+                        _target_y_mm = None
                         _detection_width_mm = None
                         _detection_target_y_mm = None
                         _car_width_mm = None
+                        _head_wall_y_offset_mm = 0.0
                         _stair_step_mode = False
                         _cur = None
                         if last_grab_action is None or last_grab_action == 'done':
@@ -2932,13 +3019,39 @@ def main():
                                 _cur['size'][2] if _cur['area'] == 'p3' else _cur['size'][1])
                             _grab_width = _n * _single_box_width
                             _box_type = last_grab_box_type
-                            _target_y_mm = _cur['pos'][1]
+                            _target_y_mm = float(_cur['pos'][1])
                             if last_grab_detection_gap is not None:
                                 _detection_width_mm = (
                                     last_grab_detection_gap['width_mm'])
                                 _detection_target_y_mm = (
                                     last_grab_detection_gap['target_y_mm'])
                             _car_width_mm = last_grab_car_width
+                            if bool(_cur.get('is_head', False)):
+                                _head_wall_y_offset_mm = max(
+                                    0.0, float(_cur.get(
+                                        'head_wall_y_offset', 0.0)))
+                                _local_target_y_mm = _target_y_mm
+                                _local_detection_target_y_mm = (
+                                    _detection_target_y_mm)
+                                _target_y_mm += _head_wall_y_offset_mm
+                                if _detection_target_y_mm is not None:
+                                    _detection_target_y_mm = (
+                                        float(_detection_target_y_mm)
+                                        + _head_wall_y_offset_mm)
+                                _car_width_mm = float(_cur.get(
+                                    'original_car_width',
+                                    float(last_grab_car_width)
+                                    + 2.0 * _head_wall_y_offset_mm))
+                                logs.info(
+                                    '[STACK-HEAD] 异形车头侧壁坐标补偿：'
+                                    f'码垛Y={_local_target_y_mm:.1f}mm -> '
+                                    f'侧壁Y={_target_y_mm:.1f}mm，'
+                                    f'单侧偏移={_head_wall_y_offset_mm:.1f}mm，'
+                                    f'码垛可用宽={float(last_grab_car_width):.1f}mm，'
+                                    f'侧壁坐标宽={_car_width_mm:.1f}mm，'
+                                    f'真实缺口Y='
+                                    f'{_local_detection_target_y_mm} -> '
+                                    f'{_detection_target_y_mm}')
                             _stair_step_mode = (
                                 last_grab_block_type == 'mixture')
                             # 当前行高度：pos[2] 为放置点底面距地板高度(mm)，加箱竖向跨度=顶面相对高度
@@ -2946,6 +3059,11 @@ def main():
                             _box_vspan = _cur['size'][1] if _cur['area'] == 'p3' else _cur['size'][2]
                             _rel_top_h = (_cur['pos'][2] + _box_vspan) / 1000.0
                             _box_h_m = _box_vspan / 1000.0
+                        if activate_wall_face(last_grab_face_key):
+                            logs.info(
+                                f"[STACK-WALL] 切换到码垛面"
+                                f"{last_grab_face_key}：当前面缓存已清空，"
+                                "上一面坐标仅作弱点云搜索参考")
                         # 偏航补偿角：由该抓所属 block 箱型对应的拍照位 J1
                         # 与正对 J1 之差决定。采集前记录可直接复制的离线回放调用。
                         _yaw_off = _yaw_offset_for_box(_box_type)

@@ -1,10 +1,3 @@
-"""基于三平面求交的车厢/垛面角点检测。
-
-输入为 Open3D 点云（米）。算法先把雷达点云绕 Z 轴旋转到内部坐标系，再提取前面、
-左右侧面与地面；角点转换到机器人基坐标系后以毫米返回。``method`` 用于选择常规
-车头、I/L 垛面、车尾俯仰、异形车头或混装前表面的不同处理分支。
-"""
-
 import open3d as o3d
 import numpy as np
 import math
@@ -49,7 +42,6 @@ SPECIAL_FRONT_MIN_PLANE_POINTS = 300
 SPECIAL_FRONT_MIN_HEIGHT_M = 0.60
 SPECIAL_FRONT_MIN_WIDTH_M = 0.08
 SPECIAL_FRONT_MIN_INLIER_RATIO = 0.45
-SPECIAL_FRONT_FALLBACK_SIDE_PERCENTILE = 3.0
 SIDE_ANGLE_MIN_X_M = 0.0
 SIDE_ANGLE_FRONT_MARGIN_M = 0.03
 SIDE_ANGLE_Y_HALF_BAND_M = 0.08
@@ -72,7 +64,6 @@ class CornerDetectionCandidateError(ValueError):
 
 
 def require_candidate_points(pcd, name, min_points=MIN_PLANE_CANDIDATE_POINTS):
-    """校验 Open3D 点云点数，不足时抛出可安全降级的候选异常。"""
     point_count = len(pcd.points)
     if point_count < min_points:
         raise CornerDetectionCandidateError(
@@ -81,7 +72,6 @@ def require_candidate_points(pcd, name, min_points=MIN_PLANE_CANDIDATE_POINTS):
 
 
 def require_candidate_values(values, name, min_values=1):
-    """校验数组/序列有效元素数量，不足时抛出候选异常。"""
     value_count = len(values)
     if value_count < min_values:
         raise CornerDetectionCandidateError(
@@ -301,12 +291,10 @@ def estimate_ground_normal_consensus(points, name="Ry地面", trials=31):
 
 
 def _wrap_angle_deg(angle):
-    """把角度归一化到 ``[-180°, 180°)``。"""
     return (float(angle) + 180.0) % 360.0 - 180.0
 
 
 def relative_ry_from_0630_baseline(raw_ry_deg):
-    """把原始 Ry 换算为相对车厢内标定零点的角度，并应用死区。"""
     delta = _wrap_angle_deg(raw_ry_deg - RY_INTERIOR_BASELINE_DEG)
     return 0.0 if abs(delta) < RY_OUTPUT_DEADBAND_DEG else delta
 
@@ -586,13 +574,16 @@ def detect_special_front_planes(points, normals, center_model,
 
 
 def _process_point_cloud_impl(pcd, method):
-    """执行角点检测主流程；输入点云会原位旋转到算法内部坐标系。
-
-    method 含义：1=车头波纹板，2=I形垛面，3=L形垛面四角点，
-    4=I形垛面并输出相对车厢内基准的 Ry，5=异形车头双斜面（双斜面
-    识别失败时回退method=2，并使用更靠内的侧壁分位），
-    6=前一面为混装面并选择最靠雷达的有效前表面。除 method=4 外 Ry 为0。
-    """
+    # #保存pcd点云到路径
+    # target_file_path = "/home/fanuc/Test_ws/corn_poits.pcd"
+    # success = o3d.io.write_point_cloud(target_file_path, pcd, write_ascii=True)
+    # if success:
+    #     print(f"传入点云已成功保存到 {target_file_path}")
+    # else:
+    #     print("点云保存失败")
+    # file_path = "/home/fanuc/data_nav/carriage/trun_cloud_20250714_130945.pcd"
+    # pcd = o3d.io.read_point_cloud(file_path)
+    # method = 3
     ori_points = np.asarray(pcd.points)
     theta = np.pi / 2
     R_z = np.array([
@@ -602,13 +593,33 @@ def _process_point_cloud_impl(pcd, method):
     ])
     rotated_points = np.dot(ori_points, R_z.T)
     pcd.points = o3d.utility.Vector3dVector(rotated_points)
+    # 打印点云数量
     num_points = len(np.asarray(pcd.points))
     print(f"******输入点云数量为 : {num_points}")
 
 
+    # target_file_path_ply = "/home/fanuc/Test_ws/corn.ply"
+    # #保存ply点云到目标路径
+    # success = o3d.io.write_point_cloud(target_file_path_ply, pcd)
+    # if success:
+    #     print(f"传入点云已成功保存到 {target_file_path_ply}")
+    # else:
+    #     print("点云保存失败")
+
+
     def segment_plane(pcd, distance_threshold=0.005, ransac_n=3,
                       num_iterations=10000, candidate_name="平面"):
-        """校验候选点后执行 RANSAC，返回 ``(模型, 内点云, 外点云)``。"""
+        """
+        分割点云中的平面并在原始点云上以不同颜色标记显示。
+        Args:
+            pcd: Open3D 点云对象
+            distance_threshold: RANSAC 的距离阈值
+            ransac_n: RANSAC 拟合平面所需的最小点数
+            num_iterations: RANSAC 的迭代次数
+        Returns:
+            planes: 分割出的平面点云列表
+            remaining_cloud: 剩余点云
+        """
         require_candidate_points(
             pcd, candidate_name, max(ransac_n, MIN_PLANE_CANDIDATE_POINTS))
         plane_model, inliers = pcd.segment_plane(
@@ -622,7 +633,14 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def show_plane(model, color):
-        """把平面方程绘制为指定颜色的薄盒网格。"""
+        """
+        平面拟合可视化。
+        Args:
+            model: 平面方程
+            color: 绘制颜色
+        Returns:
+            plane_mesh: Open3D Box对象
+        """
         normal = np.array([model[0], model[1], model[2]])
         normal = normal / np.linalg.norm(normal)  # 单位化目标法向
         # 计算平面法向量的旋转
@@ -657,19 +675,34 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def intersection_of_planes(plane1, plane2, plane3):
-        """通过线性方程组求三个平面的唯一交点。"""
+        """
+        拟合三个平面的交点。
+        Args:
+            plane1, plane2, plane3: 平面方程
+        Returns:
+            intersection_point: 交点
+        """
+        # 解线性方程组 Ax = b，求解三个平面的交点
         A = np.array([
             [plane1[0], plane1[1], plane1[2]],
             [plane2[0], plane2[1], plane2[2]],
             [plane3[0], plane3[1], plane3[2]]
         ])
         b = np.array([-plane1[3], -plane2[3], -plane3[3]])
+        # 使用np.linalg.solve求解
         intersection_point = np.linalg.solve(A, b)
         return intersection_point
 
 
     def matrix2euler(r):
-        """将 4×4 位姿矩阵转换为 ``[x,y,z,roll,pitch,yaw]``（角度制）。"""
+        """
+        旋转矩阵转欧拉角xyzwpr。
+        Args:
+            r: 4*4旋转矩阵
+        Returns:
+            xyzwpr
+        """
+        # 确保传入的是3x3旋转矩阵
         assert r.shape == (4, 4)
         # 计算欧拉角 (ZYX 顺序)
         yaw = np.arctan2(r[1, 0], r[0, 0])  # z轴旋转
@@ -679,18 +712,18 @@ def _process_point_cloud_impl(pcd, method):
 
 
     def point_to_plane_distance(point, a, b, c, d):
-        """返回点代入平面方程后的未归一化有符号值。"""
+        # 计算点到平面的符号
         return a * point[0] + b * point[1] + c * point[2] + d
 
 
     def fiterCloud(pcd):
-        """执行统计离群点过滤；函数名保留旧接口拼写。"""
+        # vox_pcd = pcd
+        # vox_pcd = pcd.voxel_down_sample(voxel_size=0.005)
         down_pcd = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)[0]
         return down_pcd
 
 
     def clustFrontBoard(pcd):
-        """把 L 形垛面的前板聚成两组平面，返回前后模型及各自 Y 跨度。"""
         require_candidate_points(pcd, "L垛面聚类")
         labels = np.array(pcd.cluster_dbscan(eps=0.03, min_points=10))
         unique_labels, counts = np.unique(labels, return_counts=True)
@@ -742,6 +775,7 @@ def _process_point_cloud_impl(pcd, method):
         merged_points = selected_clusters[0]
         for cloud in selected_clusters[1:]:
             merged_points += cloud
+        # merged_points.paint_uniform_color([1, 1, 0])
         other_points = other_clusters[0]
         for cloud in other_clusters[1:]:
             other_points += cloud
@@ -775,6 +809,7 @@ def _process_point_cloud_impl(pcd, method):
             other_points, candidate_name="L垛面第二组")
         aabb = other_points.get_axis_aligned_bounding_box()
         bounding_box_other = aabb.get_extent()
+        # final_plane_model[3] = -d_array.min()
         if len(merged_points.points) <= len(other_points.points):
             return [[final_plane_model[0], final_plane_model[1], final_plane_model[2], final_plane_model[3],
                     bounding_box_final[1]],
@@ -788,14 +823,16 @@ def _process_point_cloud_impl(pcd, method):
     
     start_time = time.time()
     global view
-    view =  False
+    view = True
     debug = view
     view_normal = False
     if view or view_normal:
         _prepare_visualization_backend()
     corner_list = []
-    special_front_fallback = False
-    # method 的完整定义见本函数文档字符串。
+    # 1: 车头波纹板；2: I垛面；3: L垛面；
+    # 4: I垛面角点，并返回相对车厢内基准的 Ry；
+    # 5: 异形车头，返回正面与左右斜面交线在地面上的两个点。
+    # 6: 前一面为混装面，按法向深度分层并使用最外侧有效箱面。
     print(f'method: {method}')
     _FRONT_RIB_MIN = 0.05            # 车头加强筋兜底补偿(m)：筋检测不足时至少前移此距离
     _FRONT_RIB_MAX = 0.10            # 车头加强筋补偿上限(m)：检测过深时最多前移此距离
@@ -825,6 +862,7 @@ def _process_point_cloud_impl(pcd, method):
         removed_display_points = len(display_points) - len(display_pcd.points)
         if removed_display_points:
             print(f'Down可视化已排除异常超远点: {removed_display_points}')
+        # display_pcd.paint_uniform_color([0.2, 0.2, 0.2])
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name="Down", width=800, height=600, left=500, top=200)
         vis.add_geometry(display_pcd, reset_bounding_box=True)
@@ -936,23 +974,11 @@ def _process_point_cloud_impl(pcd, method):
         else:
             i_model = [a, b, c, d]
         if method == 5:
-            try:
-                (special_left_model,
-                 special_right_model,
-                 special_left_cloud,
-                 special_right_cloud) = detect_special_front_planes(
-                    points, normals, i_model, inlier_cloud.points)
-            except (CornerDetectionCandidateError, ValueError,
-                    np.linalg.LinAlgError) as exc:
-                # method=5来自异形车头先验，但现场结构可能接近正常车头，
-                # 或斜面过小而无法稳定拟合。此时沿用已经拟合好的中间正面，
-                # 后续按method=2使用左右侧壁与地面求角点。
-                special_front_fallback = True
-                method = 2
-                print(
-                    '异形车头双斜面识别失败，回退method=2常规车头识别: '
-                    f'{type(exc).__name__}: {exc}'
-                )
+            (special_left_model,
+             special_right_model,
+             special_left_cloud,
+             special_right_cloud) = detect_special_front_planes(
+                points, normals, i_model, inlier_cloud.points)
         if view:
             front_plane2 = show_plane(i_model, [0, 1, 0])
             if method == 5:
@@ -1047,16 +1073,136 @@ def _process_point_cloud_impl(pcd, method):
         raise Exception(
             f'Wrong method value: {method}; expected 1, 2, 3, 4, 5, or 6')
 
-    # 异形识别失败后的常规侧壁采用更靠近车厢内部的3%点云均值。
-    # 常规method=2仍保持原来的10%，避免改变已经验证稳定的正常流程。
-    side_percentile = (
-        SPECIAL_FRONT_FALLBACK_SIDE_PERCENTILE
-        if special_front_fallback else _SIDE_PCT
-    )
-    if special_front_fallback:
-        print(
-            f'异形回退侧壁安全内缩: 使用内侧{side_percentile:g}%点云均值'
+    # method=1 用于车头角点检测。车头异形段可能超过原先固定的
+    # 600 mm 搜索纵深，因此侧壁候选需从旋转后坐标系 X=100 mm
+    # 一直搜索到车头正面前 30 mm。这里单独重建侧壁候选点云，
+    # 不扩大上方车头正面/加强筋检测所用的 X=1~2 m ROI，避免远处
+    # 箱面或其他结构影响车头正面拟合。
+    method1_side_x_min = 0.10
+    if method == 1:
+        method1_side_x_max = -i_model[3] - 0.03
+        side_source_points = np.asarray(down_pcd.points)
+        side_roi_mask = (
+            np.isfinite(side_source_points).all(axis=1) &
+            (side_source_points[:, 0] >= method1_side_x_min) &
+            (side_source_points[:, 0] < method1_side_x_max) &
+            (side_source_points[:, 1] >= -2.0) &
+            (side_source_points[:, 1] <= 2.0) &
+            (side_source_points[:, 2] >= -1.0) &
+            (side_source_points[:, 2] <= 1.0)
         )
+        side_filtered_pcd = o3d.geometry.PointCloud()
+        side_filtered_pcd.points = o3d.utility.Vector3dVector(
+            side_source_points[side_roi_mask])
+        side_filtered_pcd = fiterCloud(side_filtered_pcd)
+        require_candidate_points(
+            side_filtered_pcd, "method=1侧壁扩展ROI", min_points=50)
+        side_filtered_pcd.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamKNN(knn=50))
+        filtered_pcd = side_filtered_pcd
+        points = np.asarray(filtered_pcd.points)
+        normals = np.asarray(filtered_pcd.normals)
+        print(
+            f'method=1侧壁搜索X范围：'
+            f'{method1_side_x_min * 1000:.0f}~'
+            f'{method1_side_x_max * 1000:.1f}mm，'
+            f'候选点={len(points)}')
+
+    # method=2 默认仍使用车头/垛面前方 600 mm 内的局部侧壁。只有某一侧
+    # 最终可用于拟合的点数不足时，才按 method=1 的 X 范围扩大搜索；左右
+    # 两侧独立判断，避免一侧正常时也改变其稳定结果。
+    method2_expanded_side_cache = None
+
+    def get_method2_expanded_wall(side, x_max):
+        nonlocal method2_expanded_side_cache
+        if method2_expanded_side_cache is None:
+            source_points = np.asarray(down_pcd.points)
+            expanded_roi_mask = (
+                np.isfinite(source_points).all(axis=1) &
+                (source_points[:, 0] >= method1_side_x_min) &
+                (source_points[:, 0] < x_max) &
+                (source_points[:, 1] >= -2.0) &
+                (source_points[:, 1] <= 2.0) &
+                (source_points[:, 2] >= -1.0) &
+                (source_points[:, 2] <= 1.0)
+            )
+            expanded_pcd = o3d.geometry.PointCloud()
+            expanded_pcd.points = o3d.utility.Vector3dVector(
+                source_points[expanded_roi_mask])
+            if len(expanded_pcd.points) >= 20:
+                expanded_pcd = fiterCloud(expanded_pcd)
+            if len(expanded_pcd.points) < MIN_PLANE_CANDIDATE_POINTS:
+                method2_expanded_side_cache = (
+                    np.asarray(expanded_pcd.points), None)
+            else:
+                expanded_pcd.estimate_normals(
+                    search_param=o3d.geometry.KDTreeSearchParamKNN(knn=50))
+                expanded_points = np.asarray(expanded_pcd.points)
+                expanded_normals = np.asarray(expanded_pcd.normals)
+                flip = (
+                    expanded_normals[:, 1] * expanded_points[:, 1]) < 0
+                expanded_normals[flip] *= -1
+                method2_expanded_side_cache = (
+                    expanded_points, expanded_normals)
+
+        expanded_points, expanded_normals = method2_expanded_side_cache
+        if expanded_normals is None:
+            empty_points = np.empty((0, 3))
+            return o3d.geometry.PointCloud(), {
+                'before_layer': 0,
+                'after_layer': 0,
+                'before_layer_points': empty_points,
+                'after_layer_points': empty_points,
+            }
+
+        target_y_normal = 1.0 if side == 'left' else -1.0
+        normal_mask = (
+            expanded_normals[:, 1] * target_y_normal >
+            np.cos(np.radians(10)))
+        wall_mask = (
+            normal_mask &
+            (expanded_points[:, 0] > method1_side_x_min) &
+            (expanded_points[:, 0] < x_max) &
+            (expanded_points[:, 2] > -0.5)
+        )
+        wall_pcd = o3d.geometry.PointCloud()
+        wall_pcd.points = o3d.utility.Vector3dVector(
+            expanded_points[wall_mask])
+        if len(wall_pcd.points) >= 20:
+            wall_pcd = fiterCloud(wall_pcd)
+
+        before_layer_points = np.asarray(wall_pcd.points).copy()
+        after_layer_points = before_layer_points
+        if len(before_layer_points):
+            y_values = before_layer_points[:, 1]
+            sorted_indices = np.argsort(y_values)
+            split_positions = np.where(
+                np.diff(y_values[sorted_indices]) > _SIDE_LAYER_GAP
+            )[0] + 1
+            y_layers = np.split(sorted_indices, split_positions)
+            largest_layer_size = max(len(layer) for layer in y_layers)
+            min_layer_size = max(
+                20, int(np.ceil(largest_layer_size * 0.1)))
+            valid_layers = [
+                layer for layer in y_layers
+                if len(layer) >= min_layer_size
+            ]
+            if not valid_layers:
+                valid_layers = [max(y_layers, key=len)]
+            choose_layer = max if side == 'left' else min
+            wall_indices = choose_layer(
+                valid_layers,
+                key=lambda layer: float(np.median(y_values[layer])))
+            after_layer_points = before_layer_points[wall_indices]
+            wall_pcd.points = o3d.utility.Vector3dVector(
+                after_layer_points)
+
+        return wall_pcd, {
+            'before_layer': len(before_layer_points),
+            'after_layer': len(after_layer_points),
+            'before_layer_points': before_layer_points,
+            'after_layer_points': after_layer_points,
+        }
 
     # 左侧面点云滤波
     flip_mask = (normals[:, 1] * points[:, 1]) < 0
@@ -1073,7 +1219,8 @@ def _process_point_cloud_impl(pcd, method):
     left_normal_mask = cos_theta > angle_threshold
     x_threshold = -i_model[3] - 0.03
     z_threshold = -0.5
-    mask = left_normal_mask & ((-i_model[3]-0.6) < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
+    side_x_min = method1_side_x_min if method == 1 else -i_model[3] - 0.6
+    mask = left_normal_mask & (side_x_min < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
     left_points = np.asarray(filtered_pcd.points)[mask]
     left_pcd = o3d.geometry.PointCloud()
     left_pcd.points = o3d.utility.Vector3dVector(left_points)
@@ -1121,6 +1268,26 @@ def _process_point_cloud_impl(pcd, method):
             f'剔除 {len(left_before_layer_points) - len(left_after_layer_points)} 点'
         )
 
+    if (method == 2 and
+            len(left_pcd.points) < MIN_PLANE_CANDIDATE_POINTS):
+        local_count = len(left_pcd.points)
+        expanded_left_pcd, expanded_info = get_method2_expanded_wall(
+            'left', x_threshold)
+        if len(expanded_left_pcd.points) > local_count:
+            left_pcd = expanded_left_pcd
+            left_points = np.asarray(left_pcd.points)
+            left_before_layer_points = expanded_info[
+                'before_layer_points']
+            left_after_layer_points = expanded_info[
+                'after_layer_points']
+        print(
+            f'method=2左壁局部候选不足({local_count}点)，'
+            f'扩展X范围={method1_side_x_min * 1000:.0f}~'
+            f'{x_threshold * 1000:.1f}mm，'
+            f'分层前={expanded_info["before_layer"]}点，'
+            f'分层后={expanded_info["after_layer"]}点，'
+            f'最终采用={len(left_pcd.points)}点')
+
     # 分层处理前：显示全部左壁候选点（红）
     if view:
         before_pcd = o3d.geometry.PointCloud()
@@ -1160,7 +1327,7 @@ def _process_point_cloud_impl(pcd, method):
         positive_mask = all_distances > 0
         positive_distances = all_distances[positive_mask]
         require_candidate_values(positive_distances, "左侧壁正向距离")
-        thr_l = np.percentile(positive_distances, side_percentile)
+        thr_l = np.percentile(positive_distances, _SIDE_PCT)
         left_percentile_mask = positive_mask & (all_distances <= thr_l)
         delta = float(all_distances[left_percentile_mask].mean())
         side_left_model = [0, 1, 0, -delta]
@@ -1175,8 +1342,7 @@ def _process_point_cloud_impl(pcd, method):
         vis = o3d.visualization.Visualizer()
         vis.create_window(
             window_name=(
-                f"Left wall {side_percentile:g}pct: "
-                f"red={left_percentile_mask.sum()}, "
+                f"Left wall 10pct: red={left_percentile_mask.sum()}, "
                 f"green={len(left_wall_points) - left_percentile_mask.sum()}"),
             width=800, height=600, left=500, top=200)
         vis.add_geometry(left_colored_pcd)
@@ -1189,9 +1355,11 @@ def _process_point_cloud_impl(pcd, method):
     target_normal = np.array([0, -1, 0])
     cos_theta = np.dot(normals, target_normal)
     angle_threshold = np.cos(np.radians(10))
+    # right_indices = np.where(cos_theta > angle_threshold)[0]
     x_threshold = -i_model[3]-0.03 if method != 3 else -l_model[3]-0.03
     z_threshold = -0.5
-    mask = (cos_theta > angle_threshold) & ((-i_model[3]-0.6) < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
+    side_x_min = method1_side_x_min if method == 1 else -i_model[3] - 0.6
+    mask = (cos_theta > angle_threshold) & (side_x_min < points[:, 0]) & (points[:, 0] < x_threshold) & (points[:, 2] > z_threshold)
     right_points = np.asarray(filtered_pcd.points)[mask]
     right_pcd = o3d.geometry.PointCloud()
     right_pcd.points = o3d.utility.Vector3dVector(right_points)
@@ -1239,6 +1407,26 @@ def _process_point_cloud_impl(pcd, method):
             f'剔除 {len(right_before_layer_points) - len(right_after_layer_points)} 点'
         )
 
+    if (method == 2 and
+            len(right_pcd.points) < MIN_PLANE_CANDIDATE_POINTS):
+        local_count = len(right_pcd.points)
+        expanded_right_pcd, expanded_info = get_method2_expanded_wall(
+            'right', x_threshold)
+        if len(expanded_right_pcd.points) > local_count:
+            right_pcd = expanded_right_pcd
+            right_points = np.asarray(right_pcd.points)
+            right_before_layer_points = expanded_info[
+                'before_layer_points']
+            right_after_layer_points = expanded_info[
+                'after_layer_points']
+        print(
+            f'method=2右壁局部候选不足({local_count}点)，'
+            f'扩展X范围={method1_side_x_min * 1000:.0f}~'
+            f'{x_threshold * 1000:.1f}mm，'
+            f'分层前={expanded_info["before_layer"]}点，'
+            f'分层后={expanded_info["after_layer"]}点，'
+            f'最终采用={len(right_pcd.points)}点')
+
     # 分层处理前：显示全部右壁候选点（红）
     if view:
         before_pcd = o3d.geometry.PointCloud()
@@ -1276,7 +1464,7 @@ def _process_point_cloud_impl(pcd, method):
         n_main = np.array([0, -1, 0])
         distances = right_wall_points @ n_main
         require_candidate_values(distances, "右侧壁距离")
-        thr_r = np.percentile(distances, side_percentile)
+        thr_r = np.percentile(distances, _SIDE_PCT)
         right_percentile_mask = distances <= thr_r
         delta = float(distances[right_percentile_mask].mean())
         side_right_model = [0, -1, 0, -delta]
@@ -1293,8 +1481,7 @@ def _process_point_cloud_impl(pcd, method):
         vis = o3d.visualization.Visualizer()
         vis.create_window(
             window_name=(
-                f"Right wall {side_percentile:g}pct: "
-                f"red={right_percentile_mask.sum()}, "
+                f"Right wall 10pct: red={right_percentile_mask.sum()}, "
                 f"green={len(right_wall_points) - right_percentile_mask.sum()}"),
             width=800, height=600, left=500, top=200)
         vis.add_geometry(right_colored_pcd)
@@ -1383,7 +1570,7 @@ def _process_point_cloud_impl(pcd, method):
         f'垛面法向={ry_from_front:.3f}°, 差值={ry_difference:.3f}°'
     )
 
-    # 计算前面/侧面交线与固定地面法向的夹角诊断量；当前不参与结果判定。
+    # 校验底面法线
     v1 = np.array([i_model[0], i_model[1], i_model[2]])
     v2 = np.array([side_left_model[0], side_left_model[1], side_left_model[2]])
     v3 = np.array([ground_model[0], ground_model[1], ground_model[2]])
@@ -1397,6 +1584,9 @@ def _process_point_cloud_impl(pcd, method):
     angle_rad = np.arccos(np.clip(cos_theta, -1, 1))
     angle_with_plane_rad = np.pi / 2 - angle_rad
     angle_with_plane_deg = np.degrees(angle_with_plane_rad)
+    # if angle_with_plane_deg < 85 or np.max(temp_points[:, 2]) + ground_model[3] > 0.08:
+    #     raise Exception(f"地面法线夹角: {angle_with_plane_deg:.2f}, "
+    #                     f"地面凸起： {np.max(filtered_points[:, 2]) + ground_model[3]:.2f}, 请检查具体情况")
     if view:
         ground_plane = show_plane(ground_model, [0, 1, 0])
         vis = o3d.visualization.Visualizer()
@@ -1444,17 +1634,22 @@ def _process_point_cloud_impl(pcd, method):
                          (corner_point2[2] - corner_point1[2])])
         o_be = o_be / np.linalg.norm(o_be)
         o_no = np.array([-side_left_model[0], -side_left_model[1], -side_left_model[2]])
-        # 以左右角点连线建立返回位姿的横向轴；夹角仅保留作诊断计算。
+        # 计算点积
         dot_product = np.dot(o_be, o_no)
+        # 计算模
         magnitude_a = np.linalg.norm(o_be)
         magnitude_b = np.linalg.norm(o_no)
+        # 计算夹角的余弦值
         cos_theta = dot_product / (magnitude_a * magnitude_b)
+        # 计算夹角，返回值是弧度
         theta = np.arccos(cos_theta)
+        # 将弧度转换为角度
         theta_degrees = np.degrees(theta)
         if theta_degrees < 10:
             o_re = o_be
         else:
             o_re = o_be
+        # corner_point1[0] = min(corner_point1[0], corner_point2[0])
         # 车头加强筋补偿已并入 i_model（前平面前移），此处不再额外偏移角点
         a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
@@ -1523,17 +1718,22 @@ def _process_point_cloud_impl(pcd, method):
                          (corner_point4[2] - corner_point1[2])])
         o_be = o_be / np.linalg.norm(o_be)
         o_no = np.array([-side_left_model[0], -side_left_model[1], -side_left_model[2]])
-        # L 垛同样用左、右角点连线建立返回位姿的横向轴。
+        # 计算点积
         dot_product = np.dot(o_be, o_no)
+        # 计算模
         magnitude_a = np.linalg.norm(o_be)
         magnitude_b = np.linalg.norm(o_no)
+        # 计算夹角的余弦值
         cos_theta = dot_product / (magnitude_a * magnitude_b)
+        # 计算夹角，返回值是弧度
         theta = np.arccos(cos_theta)
+        # 将弧度转换为角度
         theta_degrees = np.degrees(theta)
         if theta_degrees < 10:
             o_re = o_be
         else:
             o_re = o_be
+        # corner_point1[0] = min(corner_point1[0], corner_point4[0])
         a_re = [0.0, 0.0, 1.0]
         n_re = np.cross(o_re, a_re)
         corner_point1_m = np.array([[n_re[0], o_re[0], a_re[0], corner_point1[0] * 1000],
@@ -1647,7 +1847,7 @@ def _process_point_cloud_impl(pcd, method):
 
 
 def process_point_cloud(pcd, method):
-    """执行角点检测；候选数据不足时记录原因并安全返回空列表。"""
+    """执行角点检测；候选点不足时安全返回空列表。"""
     try:
         return _process_point_cloud_impl(pcd, method)
     except CornerDetectionCandidateError as exc:
@@ -1657,9 +1857,6 @@ def process_point_cloud(pcd, method):
 
 
 if __name__ == '__main__':
-    file_path = (
-        "/home/qinwentao/workcells/truck_loading_ws/log/robot_process/"
-        "pcd_logs/0828/trun_cloud_20260828_153630.pcd"
-    )
+    file_path = ("/home/qinwentao/workcells/truck_loading_ws/log/robot_process/pcd_logs/trun_cloud_20260909/trun_cloud_20260909_124503.pcd")
     pcd = o3d.io.read_point_cloud(file_path)
     process_point_cloud(pcd, 1)
