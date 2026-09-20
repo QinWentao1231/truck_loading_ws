@@ -100,8 +100,48 @@ def make_bin_env():
     })
 
 
+def make_p1_action(pos, size=(100, 100, 100), action=0):
+    """构造单箱P1动作，供物理支撑边界测试使用。"""
+    return {
+        'area': 'p1', 'num': [1], 'gaps': [],
+        'pos': list(pos), 'size': list(size),
+        'action': action, 'dir': 1,
+    }
+
+
+def add_checked_box(env, action, stable_override=None):
+    """按cmd_chk_path顺序分析并加入一个已码箱体。"""
+    result = env.analyze_mixture_support(action)
+    if stable_override is not None:
+        result['per_box'][0]['stable'] = bool(stable_override)
+    action['_physical_support'] = result
+    env.step(action)
+    return result
+
+
+def make_side_brace_case(bottom_ratio=0.40, side_gap=0.0,
+                         side_x_ratio=1.0, side_z_ratio=1.0,
+                         side_stable=True):
+    """构造底部右侧部分支撑、左侧已有箱体限位的单箱场景。"""
+    env = make_bin_env()
+    current = make_p1_action((0, 200, 100))
+
+    # 当前箱宽100；下层箱从右侧覆盖指定比例。
+    support_y = 300 - bottom_ratio * 100
+    lower = make_p1_action((0, support_y, 0))
+    add_checked_box(env, lower)
+
+    # 左侧箱与当前箱间距为side_gap，X/Z重叠比例由参数直接控制。
+    side = make_p1_action(
+        (0, 100 - side_gap, 0),
+        size=(100 * side_x_ratio, 100, 100 + 100 * side_z_ratio),
+    )
+    add_checked_box(env, side, stable_override=side_stable)
+    return env, current
+
+
 def make_three_grab_regular_config(box_type='101', block_type='regular'):
-    """构造一层三抓[3,3,4]垛型，用于验证最右抓数量编码。"""
+    """构造一层9箱三抓[3,3,3]垛型，用于验证最右抓数量编码。"""
     base = {
         'box_list': [box_type],
         'box': {
@@ -119,18 +159,18 @@ def make_three_grab_regular_config(box_type='101', block_type='regular'):
         'trapezoid': [],
         'mixture': [],
     }
-    stack = [[0] * 11, [0] * 11]
-    group = [[3, 3, 4], [3, 3, 4]]
+    stack = [[0] * 10, [0] * 10]
+    group = [[3, 3, 3], [3, 3, 3]]
     if block_type == 'regular':
         base['regular'] = [{
-            'N1': 10, 'N2': 0, 'N3': 0,
+            'N1': 9, 'N2': 0, 'N3': 0,
             'T12': 1, 'T3': 0, 'F13': 1, 'F2': 0,
             'E': 0, 'Nx': 0, 'Stack': stack, 'Group': group,
             'Type': box_type, 'Ishead': False,
         }]
     else:
         base['trapezoid'] = [{
-            'N1': 10, 'N3': 0, 'T1': 1, 'T3': 0, 'Nx': 0,
+            'N1': 9, 'N3': 0, 'T1': 1, 'T3': 0, 'Nx': 0,
             'Stack': stack, 'Group': group,
             'Isdoor': False, 'Type': box_type, 'Ishead': False,
         }]
@@ -139,11 +179,55 @@ def make_three_grab_regular_config(box_type='101', block_type='regular'):
 
 class MixturePlacementTest(unittest.TestCase):
 
+    def test_partial_bottom_support_is_allowed_by_stable_side_brace(self):
+        env, current = make_side_brace_case(
+            bottom_ratio=0.40, side_gap=20.0,
+            side_x_ratio=0.61, side_z_ratio=0.46)
+
+        result = env.analyze_mixture_support(current)
+        box_result = result['per_box'][0]
+
+        self.assertFalse(result['risk'])
+        self.assertEqual(box_result['support_mode'], 'side_braced')
+        self.assertTrue(box_result['stable'])
+        self.assertEqual(box_result['side_brace']['side'], 'left')
+        self.assertAlmostEqual(box_result['support_ratio'], 0.40)
+        self.assertAlmostEqual(box_result['side_brace']['gap_mm'], 20.0)
+
+    def test_side_brace_requires_at_least_35_percent_bottom_support(self):
+        env, current = make_side_brace_case(bottom_ratio=0.35)
+        accepted = env.analyze_mixture_support(current)
+        self.assertFalse(accepted['risk'])
+        self.assertEqual(
+            accepted['per_box'][0]['support_mode'], 'side_braced')
+
+        env, current = make_side_brace_case(bottom_ratio=0.349)
+
+        result = env.analyze_mixture_support(current)
+
+        self.assertTrue(result['risk'])
+        self.assertEqual(result['per_box'][0]['support_mode'], 'unbalanced')
+
+    def test_side_brace_overlap_thresholds_are_strict(self):
+        cases = (
+            {'side_x_ratio': 0.60},
+            {'side_z_ratio': 0.45},
+            {'side_gap': 20.01},
+            {'side_stable': False},
+        )
+        for case in cases:
+            with self.subTest(**case):
+                env, current = make_side_brace_case(**case)
+                result = env.analyze_mixture_support(current)
+                self.assertTrue(result['risk'])
+                self.assertEqual(
+                    result['per_box'][0]['support_mode'], 'unbalanced')
+
     def test_regular_three_grab_rightmost_uses_plus_twenty_signal(self):
         rp = RobotPosition(make_three_grab_regular_config('101'))
 
-        # 三抓执行顺序为左、右、中；右抓实际4箱，因此发送24。
-        self.assertEqual([box['num'] for box in rp.boxes], [3, 24, 3])
+        # 三抓执行顺序为左、右、中；右抓实际3箱，因此发送23。
+        self.assertEqual([box['num'] for box in rp.boxes], [3, 23, 3])
         self.assertEqual(
             [action['is_p1_three_grab_right_aligned']
              for action in rp.ori_offsets if action != 'done'],
@@ -153,22 +237,22 @@ class MixturePlacementTest(unittest.TestCase):
     def test_non_1xx_three_grab_keeps_original_plus_ten_signal(self):
         rp = RobotPosition(make_three_grab_regular_config('203'))
 
-        self.assertEqual([box['num'] for box in rp.boxes], [13, 14, 13])
+        self.assertEqual([box['num'] for box in rp.boxes], [13, 13, 13])
 
     def test_trapezoid_1xx_three_grab_uses_plus_twenty_signal(self):
         rp = RobotPosition(make_three_grab_regular_config(
             '101', block_type='trapezoid'))
 
-        self.assertEqual([box['num'] for box in rp.boxes], [3, 24, 3])
+        self.assertEqual([box['num'] for box in rp.boxes], [3, 23, 3])
 
-    def test_door_trapezoid_1xx_p1_three_grab_uses_plus_twenty_signal(self):
+    def test_door_trapezoid_keeps_original_signal_and_order(self):
         cfg = make_three_grab_regular_config(
             '101', block_type='trapezoid')
         cfg['trapezoid'][0]['Isdoor'] = True
         rp = RobotPosition(cfg)
 
-        # 门口梯形走简单分抓[2,4,4]，物理最右抓仍使用右对齐编码。
-        self.assertEqual([box['num'] for box in rp.boxes], [2, 4, 24])
+        # 门口梯形保持简单行左中右顺序，并明确排除+20右对齐编码。
+        self.assertEqual([box['num'] for box in rp.boxes], [2, 3, 4])
 
     def test_1xx_p3_three_grab_does_not_use_plus_twenty_signal(self):
         cfg = make_three_grab_regular_config('101')

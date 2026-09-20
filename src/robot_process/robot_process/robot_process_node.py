@@ -2642,13 +2642,22 @@ def main():
                                         f"[CHK-SUPPORT] Round.{action['id']} "
                                         f"{issue_text}")
                                 else:
+                                    side_braces = [
+                                        {
+                                            'box': item['index'],
+                                            **item['side_brace'],
+                                        }
+                                        for item in physical_support['per_box']
+                                        if item.get('side_braced')
+                                    ]
                                     logs.info(
                                         f"[CHK-SUPPORT] Round.{action['id']} 支撑正常："
                                         f"整抓={physical_support['support_ratio'] * 100:.1f}%，"
                                         f"最低单箱="
                                         f"{physical_support['min_box_support_ratio'] * 100:.1f}%，"
                                         f"方式="
-                                        f"{[item['support_mode'] for item in physical_support['per_box']]}")
+                                        f"{[item['support_mode'] for item in physical_support['per_box']]}，"
+                                        f"侧向限位={side_braces or '无'}")
                             except Exception as _support_error:
                                 issue_text = (
                                     f"混装物理支撑分析失败: {_support_error}")

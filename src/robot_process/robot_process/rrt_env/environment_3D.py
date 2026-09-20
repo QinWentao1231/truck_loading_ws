@@ -1224,14 +1224,29 @@ class BinEnv:
             config_data.get('mixture_support_min_ratio', 0.80))
         self.mixture_support_min_box_ratio = float(
             config_data.get('mixture_support_min_box_ratio', 0.60))
+        self.mixture_side_brace_min_bottom_ratio = float(
+            config_data.get(
+                'mixture_side_brace_min_bottom_ratio', 0.35))
+        self.mixture_side_brace_max_gap_mm = float(
+            config_data.get('mixture_side_brace_max_gap_mm', 20.0))
+        self.mixture_side_brace_min_x_overlap_ratio = float(
+            config_data.get(
+                'mixture_side_brace_min_x_overlap_ratio', 0.60))
+        self.mixture_side_brace_min_z_overlap_ratio = float(
+            config_data.get(
+                'mixture_side_brace_min_z_overlap_ratio', 0.45))
         # 面积阈值随支撑结果输出，当前只作诊断；风险由重心稳定性判定。
         self.objects = []          # 含 reserve_object 外扩的 AABB，用于安全段碰撞检测
         self.display_objects = []  # 真实尺寸 AABB，用于落箱段、支撑分析和可视化
+        # 与 display_objects 一一对应，记录已码箱体在放置时是否稳定。
+        # 混装侧向限位只能引用已经判定稳定的箱体，避免风险逐层传递。
+        self.display_object_stability = []
 
     def reset(self):
         """清空当前面的安全 AABB 与真实 AABB。"""
         self.objects = []
         self.display_objects = []
+        self.display_object_stability = []
 
     @staticmethod
     def _aabb_intersects(a, b, tol=0.5):
@@ -1464,13 +1479,103 @@ class BinEnv:
         return cls._point_in_convex_polygon(
             point, cls._convex_hull(corners))
 
+    def _find_mixture_side_brace(self, box, support_rectangles,
+                                 support_ratio):
+        """查找能够阻止当前箱体沿Y方向倾倒的已码侧挡箱。
+
+        侧向限位只作为底部部分支撑的补充，不能替代承重。要求底部支撑率
+        不低于配置阈值；重心必须明确位于底部支撑范围的左侧或右侧；对应
+        倾倒侧必须存在已判定稳定的箱体，且间隙、X重叠和Z重叠均满足阈值。
+        X/Z重叠阈值使用严格大于，侧面间隙使用小于等于。
+        """
+        min_bottom_ratio = min(max(
+            self.mixture_side_brace_min_bottom_ratio, 0.0), 1.0)
+        if support_ratio + 1e-9 < min_bottom_ratio:
+            return None
+        if not support_rectangles:
+            return None
+
+        x0 = float(box.position[0])
+        y0 = float(box.position[1])
+        z0 = float(box.position[2])
+        x1 = x0 + float(box.length)
+        y1 = y0 + float(box.width)
+        z1 = z0 + float(box.height)
+        center_y = (y0 + y1) * 0.5
+        support_y_min = min(rect[1] for rect in support_rectangles)
+        support_y_max = max(rect[3] for rect in support_rectangles)
+        if center_y < support_y_min - 1e-6:
+            tipping_side = 'left'
+        elif center_y > support_y_max + 1e-6:
+            tipping_side = 'right'
+        else:
+            # 重心若是沿X方向越出支撑区，Y向邻箱不能提供有效限位。
+            return None
+
+        max_gap = max(0.0, self.mixture_side_brace_max_gap_mm)
+        min_x_ratio = min(max(
+            self.mixture_side_brace_min_x_overlap_ratio, 0.0), 1.0)
+        min_z_ratio = min(max(
+            self.mixture_side_brace_min_z_overlap_ratio, 0.0), 1.0)
+        box_length = max(0.0, x1 - x0)
+        box_height = max(0.0, z1 - z0)
+        if box_length <= 0.0 or box_height <= 0.0:
+            return None
+
+        candidates = []
+        for obstacle_index, obstacle in enumerate(self.display_objects):
+            if (obstacle_index >= len(self.display_object_stability)
+                    or not self.display_object_stability[obstacle_index]):
+                continue
+            obs_x0, obs_y0, obs_z0, obs_x1, obs_y1, obs_z1 = map(
+                float, obstacle)
+            if tipping_side == 'left':
+                gap = y0 - obs_y1
+            else:
+                gap = obs_y0 - y1
+            if gap < -1e-6 or gap > max_gap + 1e-6:
+                continue
+
+            x_overlap = max(
+                0.0, min(x1, obs_x1) - max(x0, obs_x0))
+            z_overlap = max(
+                0.0, min(z1, obs_z1) - max(z0, obs_z0))
+            x_overlap_ratio = x_overlap / box_length
+            z_overlap_ratio = z_overlap / box_height
+            if x_overlap_ratio <= min_x_ratio + 1e-9:
+                continue
+            if z_overlap_ratio <= min_z_ratio + 1e-9:
+                continue
+            candidates.append({
+                'side': tipping_side,
+                'obstacle_index': obstacle_index,
+                'gap_mm': round(max(0.0, gap), 6),
+                'x_overlap_ratio': round(x_overlap_ratio, 6),
+                'z_overlap_ratio': round(z_overlap_ratio, 6),
+                'bottom_support_ratio': round(support_ratio, 6),
+            })
+
+        if not candidates:
+            return None
+        # 优先使用间隙最小、侧面重叠最大的稳定箱体。
+        return min(
+            candidates,
+            key=lambda item: (
+                item['gap_mm'],
+                -item['z_overlap_ratio'],
+                -item['x_overlap_ratio'],
+                item['obstacle_index'],
+            ))
+
     def analyze_mixture_support(self, action):
         """分析混装P1当前抓底面受到已码箱体支撑的面积比例。
 
         只使用 display_objects 中已经实际码放的箱体。支撑面高度与当前
         放置底面的差值不超过配置容差时视为接触；地面层直接按完全支撑。
-        稳定性按重心投影是否落在所有接触面的联合凸包内判断：上层箱跨在
-        两个下层箱上时，即使每个接触面较小，只要两侧能共同托住重心就稳定。
+        稳定性优先按重心投影是否落在所有接触面的联合凸包内判断：上层箱
+        跨在两个下层箱上时，只要两侧能共同托住重心就稳定。若重心沿Y方向
+        越出底部支撑区，还允许由倾倒侧已经稳定的箱体提供侧向限位，但底部
+        支撑率、侧面间隙以及X/Z重叠必须同时满足配置阈值。
         面积比例保留为诊断信息，不再单独触发“支撑面积不足”。
         返回值仅供检查、日志和可视化使用，不参与路径放行。
         """
@@ -1535,19 +1640,28 @@ class BinEnv:
                 for rect in support_rectangles)
             hull_supported = self._support_hull_contains(
                 (center_x, center_y), support_rectangles)
+            bridge_supported = (
+                hull_supported and len(box_supporter_indices) >= 2)
+            side_brace = None
+            if not on_floor and not center_supported and not bridge_supported:
+                side_brace = self._find_mixture_side_brace(
+                    box, support_rectangles, support_ratio)
+            side_braced = side_brace is not None
             if on_floor:
                 support_mode = 'floor'
             elif center_supported:
                 support_mode = 'direct'
-            elif hull_supported and len(box_supporter_indices) >= 2:
+            elif bridge_supported:
                 support_mode = 'bridge'
+            elif side_braced:
+                support_mode = 'side_braced'
             elif supported_area <= 0:
                 support_mode = 'floating'
             else:
                 support_mode = 'unbalanced'
             stable = (
                 on_floor or center_supported or
-                (hull_supported and len(box_supporter_indices) >= 2))
+                bridge_supported or side_braced)
             total_supported_area += supported_area
             per_box.append({
                 'index': box_index,
@@ -1558,6 +1672,8 @@ class BinEnv:
                 'stable': bool(stable),
                 'support_mode': support_mode,
                 'supporter_count': len(box_supporter_indices),
+                'side_braced': bool(side_braced),
+                'side_brace': side_brace,
             })
 
         total_ratio = (
@@ -1586,11 +1702,26 @@ class BinEnv:
             'unsupported_ratio': round(max(0.0, 1.0 - total_ratio), 6),
             'min_box_support_ratio': round(min_observed_box_ratio, 6),
             'risk_box_indices': risk_box_indices,
+            'side_braced_box_indices': [
+                item['index'] for item in per_box
+                if item['side_braced']
+            ],
             'supporter_count': len(supporter_indices),
             'z_tolerance_mm': z_tolerance,
             'min_support_ratio': min_total_ratio,
             'required_min_box_support_ratio': min_box_ratio,
-            'stability_rule': 'center_of_mass_in_support_hull',
+            'side_brace_thresholds': {
+                'min_bottom_support_ratio': min(max(
+                    self.mixture_side_brace_min_bottom_ratio, 0.0), 1.0),
+                'max_gap_mm': max(
+                    0.0, self.mixture_side_brace_max_gap_mm),
+                'min_x_overlap_ratio_exclusive': min(max(
+                    self.mixture_side_brace_min_x_overlap_ratio, 0.0), 1.0),
+                'min_z_overlap_ratio_exclusive': min(max(
+                    self.mixture_side_brace_min_z_overlap_ratio, 0.0), 1.0),
+            },
+            'stability_rule': (
+                'center_of_mass_in_support_hull_or_stable_side_brace'),
             'area_thresholds_diagnostic_only': True,
             'per_box': per_box,
         }
@@ -1674,7 +1805,8 @@ class BinEnv:
 
     def step(self, action):
         """更新障碍物列表：普通放置追加 box 包围盒，换面/block结束/全部结束时清空。
-        objects 含 reserve_object 外扩；display_objects 保留真实尺寸供可视化使用。"""
+        objects 含 reserve_object 外扩；display_objects 保留真实尺寸供可视化使用。
+        display_object_stability 与真实箱体一一对应，供后续侧向限位判断。"""
         boxs = self.to_box(action)
         if action['action'] == 0:
             if action['dir'] != 2:
@@ -1689,14 +1821,25 @@ class BinEnv:
                                          box.position[0] + box.length + self.reserve_object[0],
                                          box.position[1] + box.width,
                                          box.position[2] + box.height + self.reserve_object[2]))
-            for box in boxs:
+            support_items = (
+                action.get('_physical_support', {}).get('per_box', []))
+            for box_index, box in enumerate(boxs):
                 self.display_objects.append((box.position[0], box.position[1], box.position[2],
                                              box.position[0] + box.length,
                                              box.position[1] + box.width,
                                              box.position[2] + box.height))
+                # cmd_chk_path 的混装P1动作会携带逐箱支撑结论；缺少结论的
+                # P1箱不能作为后续侧挡。P2/P3没有该支撑分析，沿用稳定假设。
+                if box_index < len(support_items):
+                    is_stable = bool(
+                        support_items[box_index].get('stable', False))
+                else:
+                    is_stable = action['area'] != 'p1'
+                self.display_object_stability.append(is_stable)
         elif action['action'] in (1, 2, 3):
             self.objects.clear()
             self.display_objects.clear()
+            self.display_object_stability.clear()
 
     def render(self):
         """保留的环境渲染接口；当前可视化由 plotting 模块完成。"""
