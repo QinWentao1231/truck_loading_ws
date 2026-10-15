@@ -1,0 +1,2 @@
+# ROS2主程序的依赖统一维护在包根目录；旧RRT不再参与运行。
+-r ../requirements.txt

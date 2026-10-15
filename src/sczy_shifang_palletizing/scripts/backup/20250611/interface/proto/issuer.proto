@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+import "answer.proto";
+import "condition.proto";
+
+
+service Issuer {
+  rpc Issue (IssueRequest) returns (IssueReply) {}
+}
+
+message IssueRequest {
+    Condition condition = 1;
+    Answer answer = 2;
+}
+
+message IssueReply {
+    bool result = 1;
+    string message = 2;
+}
+

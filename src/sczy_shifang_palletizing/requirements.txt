@@ -1,0 +1,6 @@
+# ROS2 rclpy/launch/ament_index_python由所用ROS发行版提供，不通过pip安装。
+# ROS2 Humble使用Python 3.10，Jazzy使用Python 3.12；测试环境NumPy为1.26.4。
+numpy>=1.24,<2
+protobuf>=4.24.2,<7
+grpcio>=1.56.2,<2
+plotly>=5.15,<7

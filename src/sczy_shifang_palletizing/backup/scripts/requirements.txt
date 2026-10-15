@@ -1,0 +1,6 @@
+colorlog==6.7.0
+grpcio==1.56.2
+numpy==1.24.4
+plotly==5.15.0
+protobuf==4.24.2
+Rtree==1.0.1

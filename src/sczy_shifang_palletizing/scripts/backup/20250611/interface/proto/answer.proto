@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+message Regular{
+    int32 N1 = 1;
+    int32 N2 = 2;
+    int32 N3 = 3;
+    int32 T12 = 4;
+    int32 T3 = 5;
+    int32 F13 = 6;
+    int32 F2 = 7;
+    int32 E = 8;
+    int32 Nx = 9;
+    repeated Stack Stack = 10;
+    repeated Group Group = 11;
+    string Type = 12;
+}
+
+message Mixture{
+    int32 Na = 1;
+    int32 Ta = 2;
+    int32 Fa = 3;
+    int32 Nax = 4;
+    int32 Tax = 5;
+    int32 Nb = 6;
+    int32 Tb = 7;
+    int32 Fb = 8;
+    int32 Nbx = 9;
+    int32 Tbx = 10;
+}
+
+message Trapezoid{
+    int32 N1 = 1;
+    int32 N3 = 2;
+    int32 T1 = 3;
+    int32 T3 = 4;
+    int32 Nx = 5;
+    repeated Stack Stack = 6;
+    repeated Group Group = 7;
+    bool Isdoor = 8;
+    string Type = 9;
+}
+
+message Stack{
+    repeated int32 Width = 1;
+}
+
+message Group{
+    repeated int32 Unit = 1;
+}
+
+message Index{
+    int32 Ns = 1;
+    float Us = 2;
+    float Um = 3;
+    repeated int32 Gn = 4;
+    float Tp = 5;
+}
+
+message Answer{
+    repeated Regular regular = 1;
+    repeated Mixture mixture = 2;
+    repeated Trapezoid trapezoid = 3;
+}

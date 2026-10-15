@@ -1,0 +1,124 @@
+2024-06-13 00:23:13,760 - main.py[line:62] - INFO: ******垛序及机器人路径规划程序启动 ver.0.2.0-alpha******
+2024-06-13 00:23:13,761 - main.py[line:77] - INFO: 读取参数文件成功！
+2024-06-13 00:23:13,769 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 00:23:17,788 - main.py[line:107] - INFO: 接受垛型数据完成！
+2024-06-13 00:23:17,789 - main.py[line:110] - INFO: 等待机器人连接中...
+2024-06-13 00:23:22,298 - main.py[line:62] - INFO: ******垛序及机器人路径规划程序启动 ver.0.2.0-alpha******
+2024-06-13 00:23:22,299 - main.py[line:77] - INFO: 读取参数文件成功！
+2024-06-13 00:23:22,308 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 00:23:25,826 - main.py[line:107] - INFO: 接受垛型数据完成！
+2024-06-13 00:23:25,827 - main.py[line:110] - INFO: 等待机器人连接中...
+2024-06-13 00:23:33,652 - main.py[line:62] - INFO: ******垛序及机器人路径规划程序启动 ver.0.2.0-alpha******
+2024-06-13 00:23:33,653 - main.py[line:77] - INFO: 读取参数文件成功！
+2024-06-13 00:23:33,687 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 14:34:04,288 - main.py[line:62] - INFO: ******垛序及机器人路径规划程序启动 ver.0.2.0-alpha******
+2024-06-13 14:34:04,290 - main.py[line:77] - INFO: 读取参数文件成功！
+2024-06-13 14:34:04,316 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 14:34:06,655 - main.py[line:107] - INFO: 接受垛型数据完成！
+2024-06-13 14:34:06,656 - main.py[line:110] - INFO: 等待机器人连接中...
+2024-06-13 14:35:58,732 - main.py[line:118] - INFO: 连接机器人成功！
+2024-06-13 14:35:58,735 - main.py[line:121] - INFO: 码垛环境初始化成功！
+2024-06-13 14:35:58,736 - main.py[line:126] - INFO: 计算垛序成功！
+2024-06-13 14:35:58,777 - main.py[line:182] - DEBUG: 总箱数: 30, 码垛面数：1, 箱子尺寸：长458.0 宽258.0 高578.0
+2024-06-13 14:36:37,509 - main.py[line:211] - DEBUG: 单面码垛放置次数：9
+2024-06-13 14:36:37,593 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 14:36:37,684 - main.py[line:251] - INFO: *****************NO.1 码垛面 开始！*****************
+2024-06-13 14:36:37,685 - main.py[line:252] - DEBUG: Round.1/9 start planning...
+2024-06-13 14:36:40,733 - main.py[line:343] - DEBUG: it cost 3.05 s
+2024-06-13 14:37:51,770 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 14:37:51,890 - main.py[line:252] - DEBUG: Round.2/9 start planning...
+2024-06-13 14:37:55,244 - main.py[line:343] - DEBUG: it cost 3.35 s
+2024-06-13 14:38:58,225 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 14:38:58,344 - main.py[line:252] - DEBUG: Round.3/9 start planning...
+2024-06-13 14:39:01,229 - main.py[line:343] - DEBUG: it cost 2.88 s
+2024-06-13 14:40:00,514 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 14:40:00,631 - main.py[line:252] - DEBUG: Round.4/9 start planning...
+2024-06-13 14:40:03,791 - main.py[line:343] - DEBUG: it cost 3.16 s
+2024-06-13 14:40:59,273 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 14:40:59,393 - main.py[line:252] - DEBUG: Round.5/9 start planning...
+2024-06-13 14:41:02,866 - main.py[line:343] - DEBUG: it cost 3.47 s
+2024-06-13 14:41:59,793 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 14:41:59,912 - main.py[line:252] - DEBUG: Round.6/9 start planning...
+2024-06-13 14:42:02,765 - main.py[line:343] - DEBUG: it cost 2.85 s
+2024-06-13 14:42:55,450 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 14:42:55,569 - main.py[line:252] - DEBUG: Round.7/9 start planning...
+2024-06-13 14:42:58,976 - main.py[line:343] - DEBUG: it cost 3.41 s
+2024-06-13 14:43:47,643 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 14:43:47,768 - main.py[line:252] - DEBUG: Round.8/9 start planning...
+2024-06-13 14:43:50,171 - main.py[line:343] - DEBUG: it cost 2.40 s
+2024-06-13 15:58:50,651 - main.py[line:408] - WARNING: 机器人已断开连接 ！
+2024-06-13 15:58:50,651 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 15:59:04,282 - main.py[line:107] - INFO: 接受垛型数据完成！
+2024-06-13 15:59:04,283 - main.py[line:110] - INFO: 等待机器人连接中...
+2024-06-13 16:00:03,222 - main.py[line:118] - INFO: 连接机器人成功！
+2024-06-13 16:00:03,222 - main.py[line:121] - INFO: 码垛环境初始化成功！
+2024-06-13 16:00:03,222 - main.py[line:126] - INFO: 计算垛序成功！
+2024-06-13 16:00:03,285 - main.py[line:182] - DEBUG: 总箱数: 50, 码垛面数：2, 箱子尺寸：长458.0 宽258.0 高578.0
+2024-06-13 16:00:41,894 - main.py[line:211] - DEBUG: 单面码垛放置次数：12
+2024-06-13 16:00:41,976 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 16:00:42,065 - main.py[line:251] - INFO: *****************NO.1 码垛面 开始！*****************
+2024-06-13 16:00:42,066 - main.py[line:252] - DEBUG: Round.1/15 start planning...
+2024-06-13 16:00:45,152 - main.py[line:343] - DEBUG: it cost 3.09 s
+2024-06-13 16:13:18,620 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:13:18,741 - main.py[line:252] - DEBUG: Round.2/15 start planning...
+2024-06-13 16:13:21,816 - main.py[line:343] - DEBUG: it cost 3.08 s
+2024-06-13 16:14:39,216 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:14:39,331 - main.py[line:252] - DEBUG: Round.3/15 start planning...
+2024-06-13 16:14:42,083 - main.py[line:343] - DEBUG: it cost 2.75 s
+2024-06-13 16:15:43,492 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 16:15:43,608 - main.py[line:252] - DEBUG: Round.4/15 start planning...
+2024-06-13 16:15:47,052 - main.py[line:343] - DEBUG: it cost 3.44 s
+2024-06-13 16:16:43,536 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:16:43,655 - main.py[line:252] - DEBUG: Round.5/15 start planning...
+2024-06-13 16:16:46,195 - main.py[line:343] - DEBUG: it cost 2.54 s
+2024-06-13 16:17:26,993 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:17:27,108 - main.py[line:252] - DEBUG: Round.6/15 start planning...
+2024-06-13 16:17:29,381 - main.py[line:343] - DEBUG: it cost 2.27 s
+2024-06-13 16:18:07,081 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 16:18:07,201 - main.py[line:252] - DEBUG: Round.7/15 start planning...
+2024-06-13 16:18:10,780 - main.py[line:343] - DEBUG: it cost 3.58 s
+2024-06-13 16:18:44,828 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:18:44,955 - main.py[line:252] - DEBUG: Round.8/15 start planning...
+2024-06-13 16:18:47,526 - main.py[line:343] - DEBUG: it cost 2.57 s
+2024-06-13 16:19:25,662 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:19:25,788 - main.py[line:252] - DEBUG: Round.9/15 start planning...
+2024-06-13 16:19:27,060 - main.py[line:343] - DEBUG: it cost 1.27 s
+2024-06-13 16:20:03,091 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 16:20:03,216 - main.py[line:252] - DEBUG: Round.10/15 start planning...
+2024-06-13 16:20:07,308 - main.py[line:343] - DEBUG: it cost 4.09 s
+2024-06-13 16:20:36,570 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:20:36,689 - main.py[line:252] - DEBUG: Round.11/15 start planning...
+2024-06-13 16:20:40,815 - main.py[line:343] - DEBUG: it cost 4.13 s
+2024-06-13 16:21:19,757 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:21:19,889 - main.py[line:252] - DEBUG: Round.12/15 start planning...
+2024-06-13 16:21:22,104 - main.py[line:343] - DEBUG: it cost 2.22 s
+2024-06-13 16:21:22,247 - main.py[line:401] - INFO: *****************NO.1 码垛面 结束！*****************
+2024-06-13 16:21:22,247 - main.py[line:402] - INFO: *****************NO.2 码垛面 开始！*****************
+2024-06-13 16:21:56,075 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 16:22:46,002 - main.py[line:211] - DEBUG: 单面码垛放置次数：3
+2024-06-13 16:28:05,748 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:29:37,046 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 16:29:37,046 - main.py[line:247] - INFO: 垛序规划结束 ！ 
+2024-06-13 16:47:43,430 - main.py[line:408] - WARNING: 机器人已断开连接 ！
+2024-06-13 16:47:43,430 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...
+2024-06-13 19:52:24,557 - main.py[line:107] - INFO: 接受垛型数据完成！
+2024-06-13 19:52:24,558 - main.py[line:110] - INFO: 等待机器人连接中...
+2024-06-13 19:52:53,333 - main.py[line:118] - INFO: 连接机器人成功！
+2024-06-13 19:52:53,334 - main.py[line:121] - INFO: 码垛环境初始化成功！
+2024-06-13 19:52:53,334 - main.py[line:126] - INFO: 计算垛序成功！
+2024-06-13 19:52:53,373 - main.py[line:182] - DEBUG: 总箱数: 10, 码垛面数：1, 箱子尺寸：长458.0 宽258.0 高578.0
+2024-06-13 19:53:32,348 - main.py[line:211] - DEBUG: 单面码垛放置次数：3
+2024-06-13 19:53:32,430 - main.py[line:245] - DEBUG: 来料箱子配方号：2
+2024-06-13 19:53:32,518 - main.py[line:251] - INFO: *****************NO.1 码垛面 开始！*****************
+2024-06-13 19:53:32,518 - main.py[line:252] - DEBUG: Round.1/3 start planning...
+2024-06-13 19:53:37,781 - main.py[line:343] - DEBUG: it cost 5.26 s
+2024-06-13 19:54:00,854 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 19:54:00,969 - main.py[line:252] - DEBUG: Round.2/3 start planning...
+2024-06-13 19:54:04,502 - main.py[line:343] - DEBUG: it cost 3.53 s
+2024-06-13 19:54:45,584 - main.py[line:245] - DEBUG: 来料箱子配方号：4
+2024-06-13 19:54:45,585 - main.py[line:247] - INFO: 垛序规划结束 ！ 
+2024-06-13 19:54:45,706 - main.py[line:252] - DEBUG: Round.3/3 start planning...
+2024-06-13 19:54:48,011 - main.py[line:343] - DEBUG: it cost 2.30 s
+2024-06-13 19:54:48,077 - main.py[line:404] - INFO: *****************NO.1 码垛面 结束！*****************
+2024-06-13 19:54:48,078 - main.py[line:405] - INFO: 路径规划结束 !
+2024-06-13 19:54:48,079 - main.py[line:102] - WARNING: 已启用在线模式，服务器已启动，等待接收垛型数据...

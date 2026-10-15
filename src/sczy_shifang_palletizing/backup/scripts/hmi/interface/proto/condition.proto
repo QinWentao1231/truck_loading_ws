@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+message Size{
+    float L = 1;
+    float W = 2;
+    float H = 3;
+}
+
+message Grip{
+    repeated int32 P1 = 1;
+    repeated int32 P2 = 2;
+    repeated int32 P3 = 3;
+}
+
+message CarCondition{
+    string type = 1;
+    Size original = 2;
+    Size reserve = 3;
+}
+
+message BoxCondition{
+    string type = 1;
+    Size original = 2;
+    Size reserve = 3;
+    Grip grip = 4;
+    int32 Nt = 5;
+}
+
+message Limitation{
+    int32 N1min = 1;
+    int32 T3max = 2;
+    int32 Ftrapezoid = 3;
+}
+
+message Condition{
+    CarCondition car = 1;
+    repeated BoxCondition boxes = 2;
+    Limitation limit = 3;
+}

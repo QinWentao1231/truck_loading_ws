@@ -1,0 +1,786 @@
+2023-08-25 08:51:37,894 - main.py[line:33] - INFO: ******垛序及路径规划程序启动******
+2023-08-25 08:51:37,925 - main.py[line:43] - INFO: 服务端启动，等待接收垛型数据...
+2023-08-25 08:51:37,925 - main.py[line:46] - INFO: 接受垛型数据完成！
+2023-08-25 09:35:41,637 - main.py[line:37] - INFO: ******垛序及路径规划程序启动******
+2023-08-25 09:35:41,637 - main.py[line:41] - INFO: 读取垛型配置文件成功！
+2023-08-25 09:36:42,871 - main.py[line:37] - INFO: ******垛序及路径规划程序启动******
+2023-08-25 09:36:42,871 - main.py[line:41] - INFO: 读取垛型配置文件成功！
+2023-08-25 09:37:17,836 - main.py[line:37] - INFO: ******垛序及路径规划程序启动******
+2023-08-25 09:47:25,512 - main.py[line:38] - INFO: ******垛序及路径规划程序启动******
+2023-08-25 11:07:41,422 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 11:07:41,424 - main.py[line:51] - INFO: 读取垛型配置文件成功！
+2023-08-25 11:07:41,424 - main.py[line:72] - INFO: 读取参数文件成功！
+2023-08-25 11:07:41,424 - main.py[line:75] - INFO: 等待机器人连接中...
+2023-08-25 11:07:58,848 - main.py[line:80] - INFO: 连接机器人成功！
+2023-08-25 11:07:58,849 - main.py[line:83] - INFO: 码垛环境初始化成功！
+2023-08-25 11:07:58,850 - main.py[line:88] - INFO: 计算垛序成功！
+2023-08-25 11:07:58,862 - main.py[line:135] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 11:09:03,354 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 11:09:03,354 - main.py[line:51] - INFO: 读取垛型配置文件成功！
+2023-08-25 11:09:03,354 - main.py[line:72] - INFO: 读取参数文件成功！
+2023-08-25 11:09:03,355 - main.py[line:75] - INFO: 等待机器人连接中...
+2023-08-25 11:09:16,962 - main.py[line:80] - INFO: 连接机器人成功！
+2023-08-25 11:09:16,963 - main.py[line:83] - INFO: 码垛环境初始化成功！
+2023-08-25 11:09:16,963 - main.py[line:88] - INFO: 计算垛序成功！
+2023-08-25 11:09:16,963 - main.py[line:135] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 11:10:13,694 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 11:10:13,711 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:10:13,731 - main.py[line:199] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-08-25 11:10:13,731 - main.py[line:200] - DEBUG: Round.1/74 start planning...
+2023-08-25 11:10:19,987 - main.py[line:287] - DEBUG: it cost 6.26 s
+2023-08-25 11:10:36,192 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:10:40,309 - main.py[line:287] - DEBUG: it cost 4.09 s
+2023-08-25 11:11:02,516 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:11:10,708 - main.py[line:287] - DEBUG: it cost 8.17 s
+2023-08-25 11:11:17,418 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:11:23,112 - main.py[line:287] - DEBUG: it cost 5.66 s
+2023-08-25 11:11:31,658 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:11:34,723 - main.py[line:287] - DEBUG: it cost 3.04 s
+2023-08-25 11:11:44,883 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:11:50,251 - main.py[line:287] - DEBUG: it cost 5.35 s
+2023-08-25 11:11:58,032 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:12:03,043 - main.py[line:287] - DEBUG: it cost 4.99 s
+2023-08-25 11:12:10,606 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:12:14,835 - main.py[line:287] - DEBUG: it cost 4.21 s
+2023-08-25 11:12:23,273 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:12:30,821 - main.py[line:287] - DEBUG: it cost 7.52 s
+2023-08-25 11:12:35,608 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:12:41,530 - main.py[line:287] - DEBUG: it cost 5.90 s
+2023-08-25 11:12:46,720 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:12:58,584 - main.py[line:287] - DEBUG: it cost 11.84 s
+2023-08-25 11:12:58,730 - main.py[line:346] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-08-25 11:12:58,731 - main.py[line:347] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-08-25 11:13:02,494 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:13:07,666 - main.py[line:287] - DEBUG: it cost 5.15 s
+2023-08-25 11:13:16,073 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 11:14:19,951 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 11:14:19,951 - main.py[line:51] - INFO: 读取垛型配置文件成功！
+2023-08-25 11:14:19,951 - main.py[line:72] - INFO: 读取参数文件成功！
+2023-08-25 11:14:19,952 - main.py[line:75] - INFO: 等待机器人连接中...
+2023-08-25 11:14:29,083 - main.py[line:80] - INFO: 连接机器人成功！
+2023-08-25 11:14:29,084 - main.py[line:83] - INFO: 码垛环境初始化成功！
+2023-08-25 11:14:29,084 - main.py[line:88] - INFO: 计算垛序成功！
+2023-08-25 11:14:29,084 - main.py[line:135] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 11:14:32,105 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 11:14:32,121 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:14:32,141 - main.py[line:199] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-08-25 11:14:32,141 - main.py[line:200] - DEBUG: Round.1/74 start planning...
+2023-08-25 11:14:35,258 - main.py[line:287] - DEBUG: it cost 3.12 s
+2023-08-25 11:14:39,632 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:14:39,653 - main.py[line:200] - DEBUG: Round.2/74 start planning...
+2023-08-25 11:14:44,529 - main.py[line:287] - DEBUG: it cost 4.88 s
+2023-08-25 11:14:53,930 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:14:53,956 - main.py[line:200] - DEBUG: Round.3/74 start planning...
+2023-08-25 11:14:59,200 - main.py[line:287] - DEBUG: it cost 5.24 s
+2023-08-25 11:15:08,624 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:15:08,647 - main.py[line:200] - DEBUG: Round.4/74 start planning...
+2023-08-25 11:15:13,644 - main.py[line:287] - DEBUG: it cost 5.00 s
+2023-08-25 11:15:22,711 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:15:22,734 - main.py[line:200] - DEBUG: Round.5/74 start planning...
+2023-08-25 11:15:27,335 - main.py[line:287] - DEBUG: it cost 4.60 s
+2023-08-25 11:15:35,964 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:15:35,987 - main.py[line:200] - DEBUG: Round.6/74 start planning...
+2023-08-25 11:15:42,275 - main.py[line:287] - DEBUG: it cost 6.29 s
+2023-08-25 11:15:49,248 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:15:49,271 - main.py[line:200] - DEBUG: Round.7/74 start planning...
+2023-08-25 11:15:55,118 - main.py[line:287] - DEBUG: it cost 5.85 s
+2023-08-25 11:16:01,836 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:16:01,862 - main.py[line:200] - DEBUG: Round.8/74 start planning...
+2023-08-25 11:16:05,343 - main.py[line:287] - DEBUG: it cost 3.48 s
+2023-08-25 11:16:14,254 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:16:14,276 - main.py[line:200] - DEBUG: Round.9/74 start planning...
+2023-08-25 11:16:19,254 - main.py[line:287] - DEBUG: it cost 4.98 s
+2023-08-25 11:16:26,494 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:16:26,515 - main.py[line:200] - DEBUG: Round.10/74 start planning...
+2023-08-25 11:16:31,615 - main.py[line:287] - DEBUG: it cost 5.10 s
+2023-08-25 11:16:37,320 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:16:37,341 - main.py[line:200] - DEBUG: Round.11/74 start planning...
+2023-08-25 11:16:48,538 - main.py[line:287] - DEBUG: it cost 11.20 s
+2023-08-25 11:16:48,716 - main.py[line:346] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-08-25 11:16:48,717 - main.py[line:347] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-08-25 11:16:52,462 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:16:52,484 - main.py[line:200] - DEBUG: Round.12/74 start planning...
+2023-08-25 11:16:57,721 - main.py[line:287] - DEBUG: it cost 5.24 s
+2023-08-25 11:17:06,147 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 11:17:10,033 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:17:10,059 - main.py[line:200] - DEBUG: Round.13/74 start planning...
+2023-08-25 11:17:14,699 - main.py[line:287] - DEBUG: it cost 4.64 s
+2023-08-25 11:17:24,485 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:17:24,512 - main.py[line:200] - DEBUG: Round.14/74 start planning...
+2023-08-25 11:17:33,183 - main.py[line:287] - DEBUG: it cost 8.67 s
+2023-08-25 11:17:42,335 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:17:42,359 - main.py[line:200] - DEBUG: Round.15/74 start planning...
+2023-08-25 11:17:57,203 - main.py[line:287] - DEBUG: it cost 14.84 s
+2023-08-25 11:18:01,170 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:18:01,195 - main.py[line:200] - DEBUG: Round.16/74 start planning...
+2023-08-25 11:18:11,476 - main.py[line:287] - DEBUG: it cost 10.28 s
+2023-08-25 11:18:15,089 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:18:15,114 - main.py[line:200] - DEBUG: Round.17/74 start planning...
+2023-08-25 11:18:22,680 - main.py[line:287] - DEBUG: it cost 7.57 s
+2023-08-25 11:18:28,284 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:18:28,308 - main.py[line:200] - DEBUG: Round.18/74 start planning...
+2023-08-25 11:18:34,886 - main.py[line:287] - DEBUG: it cost 6.58 s
+2023-08-25 11:18:40,970 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:18:40,994 - main.py[line:200] - DEBUG: Round.19/74 start planning...
+2023-08-25 11:18:44,775 - main.py[line:287] - DEBUG: it cost 3.78 s
+2023-08-25 11:18:53,500 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:18:53,523 - main.py[line:200] - DEBUG: Round.20/74 start planning...
+2023-08-25 11:18:57,219 - main.py[line:287] - DEBUG: it cost 3.70 s
+2023-08-25 11:19:05,586 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:19:05,609 - main.py[line:200] - DEBUG: Round.21/74 start planning...
+2023-08-25 11:19:09,860 - main.py[line:287] - DEBUG: it cost 4.25 s
+2023-08-25 11:19:16,510 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 11:19:16,533 - main.py[line:200] - DEBUG: Round.22/74 start planning...
+2023-08-25 11:19:36,721 - main.py[line:287] - DEBUG: it cost 20.19 s
+2023-08-25 11:19:36,922 - main.py[line:346] - INFO: *****************NO.2 码垛面 结束！*****************
+2023-08-25 11:19:36,922 - main.py[line:347] - INFO: *****************NO.3 码垛面 开始！*****************
+2023-08-25 11:19:40,683 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 11:19:40,705 - main.py[line:200] - DEBUG: Round.23/74 start planning...
+2023-08-25 11:19:48,036 - main.py[line:287] - DEBUG: it cost 7.33 s
+2023-08-25 12:26:09,794 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 12:26:09,798 - main.py[line:51] - INFO: 读取垛型配置文件成功！
+2023-08-25 12:26:09,799 - main.py[line:72] - INFO: 读取参数文件成功！
+2023-08-25 12:26:09,799 - main.py[line:75] - INFO: 等待机器人连接中...
+2023-08-25 12:26:21,863 - main.py[line:80] - INFO: 连接机器人成功！
+2023-08-25 12:26:21,864 - main.py[line:83] - INFO: 码垛环境初始化成功！
+2023-08-25 12:26:21,865 - main.py[line:88] - INFO: 计算垛序成功！
+2023-08-25 12:26:21,878 - main.py[line:135] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 12:26:24,882 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:26:24,898 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:26:24,921 - main.py[line:199] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-08-25 12:26:24,921 - main.py[line:200] - DEBUG: Round.1/74 start planning...
+2023-08-25 12:26:29,537 - main.py[line:287] - DEBUG: it cost 4.61 s
+2023-08-25 12:26:33,609 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:26:33,632 - main.py[line:200] - DEBUG: Round.2/74 start planning...
+2023-08-25 12:26:37,479 - main.py[line:287] - DEBUG: it cost 3.85 s
+2023-08-25 12:26:47,828 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:26:47,852 - main.py[line:200] - DEBUG: Round.3/74 start planning...
+2023-08-25 12:26:51,237 - main.py[line:287] - DEBUG: it cost 3.37 s
+2023-08-25 12:27:02,449 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:27:02,474 - main.py[line:200] - DEBUG: Round.4/74 start planning...
+2023-08-25 12:27:08,030 - main.py[line:287] - DEBUG: it cost 5.56 s
+2023-08-25 12:27:16,289 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:27:16,315 - main.py[line:200] - DEBUG: Round.5/74 start planning...
+2023-08-25 12:27:19,237 - main.py[line:287] - DEBUG: it cost 2.92 s
+2023-08-25 12:27:29,539 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:27:29,562 - main.py[line:200] - DEBUG: Round.6/74 start planning...
+2023-08-25 12:27:33,040 - main.py[line:287] - DEBUG: it cost 3.48 s
+2023-08-25 12:27:42,652 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:27:42,674 - main.py[line:200] - DEBUG: Round.7/74 start planning...
+2023-08-25 12:27:46,510 - main.py[line:287] - DEBUG: it cost 3.84 s
+2023-08-25 12:27:55,115 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:27:55,137 - main.py[line:200] - DEBUG: Round.8/74 start planning...
+2023-08-25 12:27:59,586 - main.py[line:287] - DEBUG: it cost 4.45 s
+2023-08-25 12:28:07,432 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:28:07,456 - main.py[line:200] - DEBUG: Round.9/74 start planning...
+2023-08-25 12:28:11,174 - main.py[line:287] - DEBUG: it cost 3.72 s
+2023-08-25 12:28:19,618 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:28:19,639 - main.py[line:200] - DEBUG: Round.10/74 start planning...
+2023-08-25 12:28:23,611 - main.py[line:287] - DEBUG: it cost 3.97 s
+2023-08-25 12:28:30,468 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:28:30,490 - main.py[line:200] - DEBUG: Round.11/74 start planning...
+2023-08-25 12:28:41,491 - main.py[line:287] - DEBUG: it cost 11.00 s
+2023-08-25 12:28:41,631 - main.py[line:346] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-08-25 12:28:41,632 - main.py[line:347] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-08-25 12:28:45,383 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:28:45,406 - main.py[line:200] - DEBUG: Round.12/74 start planning...
+2023-08-25 12:28:53,696 - main.py[line:287] - DEBUG: it cost 8.29 s
+2023-08-25 12:29:00,385 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:29:04,229 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:29:04,250 - main.py[line:200] - DEBUG: Round.13/74 start planning...
+2023-08-25 12:29:09,302 - main.py[line:287] - DEBUG: it cost 5.05 s
+2023-08-25 12:29:18,592 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:29:18,614 - main.py[line:200] - DEBUG: Round.14/74 start planning...
+2023-08-25 12:29:27,325 - main.py[line:287] - DEBUG: it cost 8.71 s
+2023-08-25 12:29:33,372 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:29:33,393 - main.py[line:200] - DEBUG: Round.15/74 start planning...
+2023-08-25 12:29:39,202 - main.py[line:287] - DEBUG: it cost 5.81 s
+2023-08-25 12:29:47,580 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:29:47,604 - main.py[line:200] - DEBUG: Round.16/74 start planning...
+2023-08-25 12:29:54,566 - main.py[line:287] - DEBUG: it cost 6.96 s
+2023-08-25 12:30:00,966 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:30:00,992 - main.py[line:200] - DEBUG: Round.17/74 start planning...
+2023-08-25 12:30:05,470 - main.py[line:287] - DEBUG: it cost 4.48 s
+2023-08-25 12:30:14,116 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:30:14,139 - main.py[line:200] - DEBUG: Round.18/74 start planning...
+2023-08-25 12:30:17,405 - main.py[line:287] - DEBUG: it cost 3.27 s
+2023-08-25 12:30:26,689 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:30:26,713 - main.py[line:200] - DEBUG: Round.19/74 start planning...
+2023-08-25 12:30:32,041 - main.py[line:287] - DEBUG: it cost 5.33 s
+2023-08-25 12:30:39,087 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:30:39,111 - main.py[line:200] - DEBUG: Round.20/74 start planning...
+2023-08-25 12:30:47,105 - main.py[line:287] - DEBUG: it cost 7.99 s
+2023-08-25 12:30:51,333 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:30:51,357 - main.py[line:200] - DEBUG: Round.21/74 start planning...
+2023-08-25 12:30:54,911 - main.py[line:287] - DEBUG: it cost 3.55 s
+2023-08-25 12:31:02,148 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:31:02,172 - main.py[line:200] - DEBUG: Round.22/74 start planning...
+2023-08-25 12:31:16,917 - main.py[line:287] - DEBUG: it cost 14.75 s
+2023-08-25 12:31:17,078 - main.py[line:346] - INFO: *****************NO.2 码垛面 结束！*****************
+2023-08-25 12:31:17,079 - main.py[line:347] - INFO: *****************NO.3 码垛面 开始！*****************
+2023-08-25 12:31:20,818 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:31:20,840 - main.py[line:200] - DEBUG: Round.23/74 start planning...
+2023-08-25 12:31:28,298 - main.py[line:287] - DEBUG: it cost 7.46 s
+2023-08-25 12:31:34,978 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:31:38,820 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:31:38,841 - main.py[line:200] - DEBUG: Round.24/74 start planning...
+2023-08-25 12:31:42,233 - main.py[line:287] - DEBUG: it cost 3.39 s
+2023-08-25 12:31:53,211 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:31:53,235 - main.py[line:200] - DEBUG: Round.25/74 start planning...
+2023-08-25 12:31:59,285 - main.py[line:287] - DEBUG: it cost 6.05 s
+2023-08-25 12:32:07,713 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:32:07,738 - main.py[line:200] - DEBUG: Round.26/74 start planning...
+2023-08-25 12:32:14,121 - main.py[line:287] - DEBUG: it cost 6.37 s
+2023-08-25 12:32:21,737 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:32:21,759 - main.py[line:200] - DEBUG: Round.27/74 start planning...
+2023-08-25 12:32:25,607 - main.py[line:287] - DEBUG: it cost 3.85 s
+2023-08-25 12:32:35,025 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:32:35,050 - main.py[line:200] - DEBUG: Round.28/74 start planning...
+2023-08-25 12:32:38,862 - main.py[line:287] - DEBUG: it cost 3.81 s
+2023-08-25 12:32:48,040 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:32:48,063 - main.py[line:200] - DEBUG: Round.29/74 start planning...
+2023-08-25 12:32:51,679 - main.py[line:287] - DEBUG: it cost 3.61 s
+2023-08-25 12:33:00,590 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:33:00,612 - main.py[line:200] - DEBUG: Round.30/74 start planning...
+2023-08-25 12:33:02,962 - main.py[line:287] - DEBUG: it cost 2.35 s
+2023-08-25 12:33:12,886 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:33:12,912 - main.py[line:200] - DEBUG: Round.31/74 start planning...
+2023-08-25 12:33:18,813 - main.py[line:287] - DEBUG: it cost 5.90 s
+2023-08-25 12:33:24,799 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:33:24,823 - main.py[line:200] - DEBUG: Round.32/74 start planning...
+2023-08-25 12:33:30,225 - main.py[line:287] - DEBUG: it cost 5.40 s
+2023-08-25 12:33:35,739 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:33:35,761 - main.py[line:200] - DEBUG: Round.33/74 start planning...
+2023-08-25 12:33:48,697 - main.py[line:287] - DEBUG: it cost 12.93 s
+2023-08-25 12:33:48,844 - main.py[line:346] - INFO: *****************NO.3 码垛面 结束！*****************
+2023-08-25 12:33:48,845 - main.py[line:347] - INFO: *****************NO.4 码垛面 开始！*****************
+2023-08-25 12:33:52,605 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:33:52,628 - main.py[line:200] - DEBUG: Round.34/74 start planning...
+2023-08-25 12:34:00,969 - main.py[line:287] - DEBUG: it cost 8.34 s
+2023-08-25 12:34:07,646 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:34:11,469 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:34:11,490 - main.py[line:200] - DEBUG: Round.35/74 start planning...
+2023-08-25 12:34:16,855 - main.py[line:287] - DEBUG: it cost 5.36 s
+2023-08-25 12:34:25,863 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:34:25,888 - main.py[line:200] - DEBUG: Round.36/74 start planning...
+2023-08-25 12:34:30,685 - main.py[line:287] - DEBUG: it cost 4.80 s
+2023-08-25 12:34:40,210 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:34:40,234 - main.py[line:200] - DEBUG: Round.37/74 start planning...
+2023-08-25 12:34:46,173 - main.py[line:287] - DEBUG: it cost 5.94 s
+2023-08-25 12:34:54,231 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:34:54,261 - main.py[line:200] - DEBUG: Round.38/74 start planning...
+2023-08-25 12:35:00,882 - main.py[line:287] - DEBUG: it cost 6.61 s
+2023-08-25 12:35:07,599 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:35:07,625 - main.py[line:200] - DEBUG: Round.39/74 start planning...
+2023-08-25 12:35:13,201 - main.py[line:287] - DEBUG: it cost 5.57 s
+2023-08-25 12:35:20,591 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:35:20,617 - main.py[line:200] - DEBUG: Round.40/74 start planning...
+2023-08-25 12:35:25,613 - main.py[line:287] - DEBUG: it cost 5.00 s
+2023-08-25 12:35:33,186 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:35:33,208 - main.py[line:200] - DEBUG: Round.41/74 start planning...
+2023-08-25 12:35:35,395 - main.py[line:287] - DEBUG: it cost 2.19 s
+2023-08-25 12:35:45,578 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:35:45,601 - main.py[line:200] - DEBUG: Round.42/74 start planning...
+2023-08-25 12:35:54,560 - main.py[line:287] - DEBUG: it cost 8.96 s
+2023-08-25 12:35:58,496 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:35:58,518 - main.py[line:200] - DEBUG: Round.43/74 start planning...
+2023-08-25 12:36:03,905 - main.py[line:287] - DEBUG: it cost 5.39 s
+2023-08-25 12:36:09,434 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:36:09,457 - main.py[line:200] - DEBUG: Round.44/74 start planning...
+2023-08-25 12:36:21,513 - main.py[line:287] - DEBUG: it cost 12.05 s
+2023-08-25 12:36:21,684 - main.py[line:346] - INFO: *****************NO.4 码垛面 结束！*****************
+2023-08-25 12:36:21,685 - main.py[line:347] - INFO: *****************NO.5 码垛面 开始！*****************
+2023-08-25 12:36:25,407 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:36:25,431 - main.py[line:200] - DEBUG: Round.45/74 start planning...
+2023-08-25 12:36:31,958 - main.py[line:287] - DEBUG: it cost 6.53 s
+2023-08-25 12:36:39,014 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:36:42,839 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:36:42,862 - main.py[line:200] - DEBUG: Round.46/74 start planning...
+2023-08-25 12:36:54,370 - main.py[line:287] - DEBUG: it cost 11.51 s
+2023-08-25 12:36:57,989 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:36:58,012 - main.py[line:200] - DEBUG: Round.47/74 start planning...
+2023-08-25 12:37:04,559 - main.py[line:287] - DEBUG: it cost 6.55 s
+2023-08-25 12:37:12,327 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:37:12,348 - main.py[line:200] - DEBUG: Round.48/74 start planning...
+2023-08-25 12:37:17,708 - main.py[line:287] - DEBUG: it cost 5.36 s
+2023-08-25 12:37:26,292 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:37:26,317 - main.py[line:200] - DEBUG: Round.49/74 start planning...
+2023-08-25 12:37:32,665 - main.py[line:287] - DEBUG: it cost 6.35 s
+2023-08-25 12:37:39,518 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:37:39,542 - main.py[line:200] - DEBUG: Round.50/74 start planning...
+2023-08-25 12:37:43,461 - main.py[line:287] - DEBUG: it cost 3.92 s
+2023-08-25 12:37:52,707 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:37:52,732 - main.py[line:200] - DEBUG: Round.51/74 start planning...
+2023-08-25 12:37:57,710 - main.py[line:287] - DEBUG: it cost 4.98 s
+2023-08-25 12:38:05,163 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:38:05,189 - main.py[line:200] - DEBUG: Round.52/74 start planning...
+2023-08-25 12:38:09,760 - main.py[line:287] - DEBUG: it cost 4.57 s
+2023-08-25 12:38:17,715 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:38:17,741 - main.py[line:200] - DEBUG: Round.53/74 start planning...
+2023-08-25 12:38:23,952 - main.py[line:287] - DEBUG: it cost 6.21 s
+2023-08-25 12:38:29,509 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:38:29,537 - main.py[line:200] - DEBUG: Round.54/74 start planning...
+2023-08-25 12:38:36,467 - main.py[line:287] - DEBUG: it cost 6.93 s
+2023-08-25 12:38:40,765 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:38:40,789 - main.py[line:200] - DEBUG: Round.55/74 start planning...
+2023-08-25 12:39:01,479 - main.py[line:287] - DEBUG: it cost 20.69 s
+2023-08-25 12:39:01,679 - main.py[line:346] - INFO: *****************NO.5 码垛面 结束！*****************
+2023-08-25 12:39:01,679 - main.py[line:347] - INFO: *****************NO.6 码垛面 开始！*****************
+2023-08-25 12:39:05,577 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:39:05,598 - main.py[line:200] - DEBUG: Round.56/74 start planning...
+2023-08-25 12:39:15,583 - main.py[line:287] - DEBUG: it cost 9.98 s
+2023-08-25 12:39:22,255 - main.py[line:164] - DEBUG: 单面码垛放置次数：11
+2023-08-25 12:39:26,085 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:39:26,107 - main.py[line:200] - DEBUG: Round.57/74 start planning...
+2023-08-25 12:39:32,871 - main.py[line:287] - DEBUG: it cost 6.76 s
+2023-08-25 12:39:40,567 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:39:40,595 - main.py[line:200] - DEBUG: Round.58/74 start planning...
+2023-08-25 12:39:47,244 - main.py[line:287] - DEBUG: it cost 6.65 s
+2023-08-25 12:39:54,768 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:39:54,791 - main.py[line:200] - DEBUG: Round.59/74 start planning...
+2023-08-25 12:40:03,035 - main.py[line:287] - DEBUG: it cost 8.24 s
+2023-08-25 12:40:08,987 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:40:09,010 - main.py[line:200] - DEBUG: Round.60/74 start planning...
+2023-08-25 12:40:13,900 - main.py[line:287] - DEBUG: it cost 4.89 s
+2023-08-25 12:40:22,333 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:40:22,355 - main.py[line:200] - DEBUG: Round.61/74 start planning...
+2023-08-25 12:40:27,358 - main.py[line:287] - DEBUG: it cost 4.99 s
+2023-08-25 12:40:35,186 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:40:35,212 - main.py[line:200] - DEBUG: Round.62/74 start planning...
+2023-08-25 12:40:41,306 - main.py[line:287] - DEBUG: it cost 6.09 s
+2023-08-25 12:40:47,521 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:40:47,545 - main.py[line:200] - DEBUG: Round.63/74 start planning...
+2023-08-25 12:40:50,880 - main.py[line:287] - DEBUG: it cost 3.33 s
+2023-08-25 12:40:59,970 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:40:59,994 - main.py[line:200] - DEBUG: Round.64/74 start planning...
+2023-08-25 12:41:07,792 - main.py[line:287] - DEBUG: it cost 7.80 s
+2023-08-25 12:41:12,045 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:41:12,069 - main.py[line:200] - DEBUG: Round.65/74 start planning...
+2023-08-25 12:41:17,282 - main.py[line:287] - DEBUG: it cost 5.21 s
+2023-08-25 12:41:23,046 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:41:23,075 - main.py[line:200] - DEBUG: Round.66/74 start planning...
+2023-08-25 12:41:45,773 - main.py[line:287] - DEBUG: it cost 22.70 s
+2023-08-25 12:41:46,017 - main.py[line:346] - INFO: *****************NO.6 码垛面 结束！*****************
+2023-08-25 12:41:46,017 - main.py[line:347] - INFO: *****************NO.7 码垛面 开始！*****************
+2023-08-25 12:41:49,843 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:41:49,867 - main.py[line:200] - DEBUG: Round.67/74 start planning...
+2023-08-25 12:41:57,394 - main.py[line:287] - DEBUG: it cost 7.53 s
+2023-08-25 12:42:04,442 - main.py[line:164] - DEBUG: 单面码垛放置次数：8
+2023-08-25 12:42:08,362 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:42:08,390 - main.py[line:200] - DEBUG: Round.68/74 start planning...
+2023-08-25 12:42:15,522 - main.py[line:287] - DEBUG: it cost 7.13 s
+2023-08-25 12:42:23,138 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:42:23,160 - main.py[line:200] - DEBUG: Round.69/74 start planning...
+2023-08-25 12:42:29,018 - main.py[line:287] - DEBUG: it cost 5.86 s
+2023-08-25 12:42:37,163 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:42:37,192 - main.py[line:200] - DEBUG: Round.70/74 start planning...
+2023-08-25 12:42:40,676 - main.py[line:287] - DEBUG: it cost 3.48 s
+2023-08-25 12:42:50,715 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:42:50,739 - main.py[line:200] - DEBUG: Round.71/74 start planning...
+2023-08-25 12:42:55,824 - main.py[line:287] - DEBUG: it cost 5.08 s
+2023-08-25 12:43:02,971 - main.py[line:193] - DEBUG: 来料箱子配方号：4
+2023-08-25 12:43:02,998 - main.py[line:200] - DEBUG: Round.72/74 start planning...
+2023-08-25 12:43:09,500 - main.py[line:287] - DEBUG: it cost 6.50 s
+2023-08-25 12:43:15,813 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:43:15,835 - main.py[line:200] - DEBUG: Round.73/74 start planning...
+2023-08-25 12:43:19,349 - main.py[line:287] - DEBUG: it cost 3.51 s
+2023-08-25 12:43:26,656 - main.py[line:193] - DEBUG: 来料箱子配方号：2
+2023-08-25 12:43:26,679 - main.py[line:200] - DEBUG: Round.74/74 start planning...
+2023-08-25 12:43:39,573 - main.py[line:287] - DEBUG: it cost 12.89 s
+2023-08-25 12:43:39,753 - main.py[line:349] - INFO: *****************NO.7 码垛面 结束！*****************
+2023-08-25 12:43:39,754 - main.py[line:350] - INFO: 码垛路径规划结束!
+2023-08-25 13:02:27,055 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:03:01,856 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:03:10,391 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:04:16,906 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:04:30,741 - main.py[line:54] - WARNING: 已启用离线模式，垛型参数文件为
+2023-08-25 13:04:30,741 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-25 13:04:30,742 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-25 13:04:30,742 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-25 13:05:38,525 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:05:53,252 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:06:12,833 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:06:23,594 - main.py[line:54] - INFO: 读取垛型配置文件成功！
+2023-08-25 13:06:23,595 - main.py[line:55] - WARNING: 已启用离线模式，垛型参数文件为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\testblock_2.pkl
+2023-08-25 13:06:23,595 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-25 13:06:23,595 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-25 13:21:08,706 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:21:09,710 - main.py[line:52] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-25 13:21:36,374 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:21:36,375 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-25 13:21:54,660 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-25 13:21:54,661 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-25 13:21:54,661 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-25 13:56:22,400 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 13:56:22,401 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-25 14:18:33,626 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 14:18:33,626 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-25 14:19:42,199 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-25 14:19:42,201 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-25 14:19:42,202 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-25 14:20:15,456 - main.py[line:84] - INFO: 连接机器人成功！
+2023-08-25 14:20:15,457 - main.py[line:87] - INFO: 码垛环境初始化成功！
+2023-08-25 14:20:15,462 - main.py[line:92] - INFO: 计算垛序成功！
+2023-08-25 14:20:15,463 - main.py[line:139] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 14:20:18,838 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 14:20:18,877 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:20:18,912 - main.py[line:203] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-08-25 14:20:18,914 - main.py[line:204] - DEBUG: Round.1/74 start planning...
+2023-08-25 14:20:30,861 - main.py[line:291] - DEBUG: it cost 11.94 s
+2023-08-25 14:20:35,402 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:20:35,432 - main.py[line:204] - DEBUG: Round.2/74 start planning...
+2023-08-25 14:20:49,539 - main.py[line:291] - DEBUG: it cost 14.11 s
+2023-08-25 14:20:53,318 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:20:53,342 - main.py[line:204] - DEBUG: Round.3/74 start planning...
+2023-08-25 14:21:04,590 - main.py[line:291] - DEBUG: it cost 11.25 s
+2023-08-25 14:21:09,718 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:21:09,759 - main.py[line:204] - DEBUG: Round.4/74 start planning...
+2023-08-25 14:21:21,425 - main.py[line:291] - DEBUG: it cost 11.67 s
+2023-08-25 14:21:25,846 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:21:25,882 - main.py[line:204] - DEBUG: Round.5/74 start planning...
+2023-08-25 14:21:33,496 - main.py[line:291] - DEBUG: it cost 7.61 s
+2023-08-25 14:21:40,388 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:21:40,427 - main.py[line:204] - DEBUG: Round.6/74 start planning...
+2023-08-25 14:21:52,848 - main.py[line:291] - DEBUG: it cost 12.42 s
+2023-08-25 14:21:56,898 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:21:56,924 - main.py[line:204] - DEBUG: Round.7/74 start planning...
+2023-08-25 14:22:04,023 - main.py[line:291] - DEBUG: it cost 7.10 s
+2023-08-25 14:22:10,415 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:22:10,463 - main.py[line:204] - DEBUG: Round.8/74 start planning...
+2023-08-25 14:22:16,996 - main.py[line:291] - DEBUG: it cost 6.53 s
+2023-08-25 14:22:24,065 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:22:24,114 - main.py[line:204] - DEBUG: Round.9/74 start planning...
+2023-08-25 14:22:36,831 - main.py[line:291] - DEBUG: it cost 12.71 s
+2023-08-25 14:22:41,124 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:22:41,165 - main.py[line:204] - DEBUG: Round.10/74 start planning...
+2023-08-25 14:22:50,172 - main.py[line:291] - DEBUG: it cost 9.00 s
+2023-08-25 14:22:54,431 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:22:54,482 - main.py[line:204] - DEBUG: Round.11/74 start planning...
+2023-08-25 14:23:17,692 - main.py[line:291] - DEBUG: it cost 23.21 s
+2023-08-25 14:23:18,018 - main.py[line:350] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-08-25 14:23:18,018 - main.py[line:351] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-08-25 14:23:22,084 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:23:22,134 - main.py[line:204] - DEBUG: Round.12/74 start planning...
+2023-08-25 14:23:35,726 - main.py[line:291] - DEBUG: it cost 13.59 s
+2023-08-25 14:23:43,073 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 14:23:47,032 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:23:47,059 - main.py[line:204] - DEBUG: Round.13/74 start planning...
+2023-08-25 14:23:59,547 - main.py[line:291] - DEBUG: it cost 12.49 s
+2023-08-25 14:24:03,543 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:24:03,586 - main.py[line:204] - DEBUG: Round.14/74 start planning...
+2023-08-25 14:24:22,381 - main.py[line:291] - DEBUG: it cost 18.79 s
+2023-08-25 14:24:26,559 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:24:26,582 - main.py[line:204] - DEBUG: Round.15/74 start planning...
+2023-08-25 14:24:36,308 - main.py[line:291] - DEBUG: it cost 9.72 s
+2023-08-25 14:24:41,804 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:24:41,849 - main.py[line:204] - DEBUG: Round.16/74 start planning...
+2023-08-25 14:24:50,453 - main.py[line:291] - DEBUG: it cost 8.60 s
+2023-08-25 14:24:56,122 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:24:56,159 - main.py[line:204] - DEBUG: Round.17/74 start planning...
+2023-08-25 14:25:04,561 - main.py[line:291] - DEBUG: it cost 8.40 s
+2023-08-25 14:25:10,077 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:25:10,116 - main.py[line:204] - DEBUG: Round.18/74 start planning...
+2023-08-25 14:25:17,581 - main.py[line:291] - DEBUG: it cost 7.46 s
+2023-08-25 14:25:23,931 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:25:23,990 - main.py[line:204] - DEBUG: Round.19/74 start planning...
+2023-08-25 14:25:31,158 - main.py[line:291] - DEBUG: it cost 7.17 s
+2023-08-25 14:25:37,386 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:25:37,425 - main.py[line:204] - DEBUG: Round.20/74 start planning...
+2023-08-25 14:25:49,513 - main.py[line:291] - DEBUG: it cost 12.09 s
+2023-08-25 14:25:54,038 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:25:54,078 - main.py[line:204] - DEBUG: Round.21/74 start planning...
+2023-08-25 14:26:02,326 - main.py[line:291] - DEBUG: it cost 8.25 s
+2023-08-25 14:26:06,985 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:26:07,035 - main.py[line:204] - DEBUG: Round.22/74 start planning...
+2023-08-25 14:26:25,188 - main.py[line:291] - DEBUG: it cost 18.15 s
+2023-08-25 14:26:25,481 - main.py[line:350] - INFO: *****************NO.2 码垛面 结束！*****************
+2023-08-25 14:26:25,482 - main.py[line:351] - INFO: *****************NO.3 码垛面 开始！*****************
+2023-08-25 14:26:29,509 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:26:29,558 - main.py[line:204] - DEBUG: Round.23/74 start planning...
+2023-08-25 14:26:48,500 - main.py[line:291] - DEBUG: it cost 18.94 s
+2023-08-25 14:26:56,016 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 14:27:00,226 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:27:00,256 - main.py[line:204] - DEBUG: Round.24/74 start planning...
+2023-08-25 14:27:08,143 - main.py[line:291] - DEBUG: it cost 7.89 s
+2023-08-25 14:27:15,889 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:27:15,930 - main.py[line:204] - DEBUG: Round.25/74 start planning...
+2023-08-25 14:27:27,148 - main.py[line:291] - DEBUG: it cost 11.22 s
+2023-08-25 14:27:32,174 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:27:32,227 - main.py[line:204] - DEBUG: Round.26/74 start planning...
+2023-08-25 14:27:43,656 - main.py[line:291] - DEBUG: it cost 11.43 s
+2023-08-25 14:27:48,168 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:27:48,217 - main.py[line:204] - DEBUG: Round.27/74 start planning...
+2023-08-25 14:27:57,283 - main.py[line:291] - DEBUG: it cost 9.06 s
+2023-08-25 14:28:02,644 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:28:02,689 - main.py[line:204] - DEBUG: Round.28/74 start planning...
+2023-08-25 14:28:13,175 - main.py[line:291] - DEBUG: it cost 10.48 s
+2023-08-25 14:28:17,693 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:28:17,734 - main.py[line:204] - DEBUG: Round.29/74 start planning...
+2023-08-25 14:28:42,028 - main.py[line:291] - DEBUG: it cost 24.29 s
+2023-08-25 14:28:46,313 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:28:46,341 - main.py[line:204] - DEBUG: Round.30/74 start planning...
+2023-08-25 14:28:53,564 - main.py[line:291] - DEBUG: it cost 7.22 s
+2023-08-25 14:29:00,144 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 14:29:00,185 - main.py[line:204] - DEBUG: Round.31/74 start planning...
+2023-08-25 14:29:09,728 - main.py[line:291] - DEBUG: it cost 9.54 s
+2023-08-25 14:29:13,951 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:29:13,979 - main.py[line:204] - DEBUG: Round.32/74 start planning...
+2023-08-25 14:29:21,623 - main.py[line:291] - DEBUG: it cost 7.64 s
+2023-08-25 14:29:26,127 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 14:29:26,174 - main.py[line:204] - DEBUG: Round.33/74 start planning...
+2023-08-25 14:29:56,658 - main.py[line:291] - DEBUG: it cost 30.48 s
+2023-08-25 14:29:57,087 - main.py[line:350] - INFO: *****************NO.3 码垛面 结束！*****************
+2023-08-25 14:29:57,088 - main.py[line:351] - INFO: *****************NO.4 码垛面 开始！*****************
+2023-08-25 15:47:25,175 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-25 15:47:25,176 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-25 15:47:41,974 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-25 15:47:41,975 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-25 15:47:41,976 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-25 15:47:53,427 - main.py[line:84] - INFO: 连接机器人成功！
+2023-08-25 15:47:53,428 - main.py[line:87] - INFO: 码垛环境初始化成功！
+2023-08-25 15:47:53,431 - main.py[line:92] - INFO: 计算垛序成功！
+2023-08-25 15:47:53,447 - main.py[line:139] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-08-25 15:47:56,737 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 15:47:56,765 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:47:56,810 - main.py[line:203] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-08-25 15:47:56,812 - main.py[line:204] - DEBUG: Round.1/74 start planning...
+2023-08-25 15:48:08,418 - main.py[line:291] - DEBUG: it cost 11.60 s
+2023-08-25 15:48:11,240 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:48:11,287 - main.py[line:204] - DEBUG: Round.2/74 start planning...
+2023-08-25 15:48:18,671 - main.py[line:291] - DEBUG: it cost 7.38 s
+2023-08-25 15:48:44,481 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:48:44,520 - main.py[line:204] - DEBUG: Round.3/74 start planning...
+2023-08-25 15:48:53,279 - main.py[line:291] - DEBUG: it cost 8.76 s
+2023-08-25 15:48:56,267 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:48:56,304 - main.py[line:204] - DEBUG: Round.4/74 start planning...
+2023-08-25 15:49:08,059 - main.py[line:291] - DEBUG: it cost 11.75 s
+2023-08-25 15:49:10,941 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:49:10,974 - main.py[line:204] - DEBUG: Round.5/74 start planning...
+2023-08-25 15:49:17,114 - main.py[line:291] - DEBUG: it cost 6.14 s
+2023-08-25 15:49:20,488 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:49:20,518 - main.py[line:204] - DEBUG: Round.6/74 start planning...
+2023-08-25 15:49:25,726 - main.py[line:291] - DEBUG: it cost 5.21 s
+2023-08-25 15:49:30,115 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:49:30,170 - main.py[line:204] - DEBUG: Round.7/74 start planning...
+2023-08-25 15:49:38,008 - main.py[line:291] - DEBUG: it cost 7.84 s
+2023-08-25 15:49:40,892 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:49:40,926 - main.py[line:204] - DEBUG: Round.8/74 start planning...
+2023-08-25 15:49:46,694 - main.py[line:291] - DEBUG: it cost 5.77 s
+2023-08-25 15:49:49,703 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:49:49,737 - main.py[line:204] - DEBUG: Round.9/74 start planning...
+2023-08-25 15:49:56,154 - main.py[line:291] - DEBUG: it cost 6.42 s
+2023-08-25 15:49:59,281 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:49:59,326 - main.py[line:204] - DEBUG: Round.10/74 start planning...
+2023-08-25 15:50:05,667 - main.py[line:291] - DEBUG: it cost 6.34 s
+2023-08-25 15:50:08,735 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:50:08,776 - main.py[line:204] - DEBUG: Round.11/74 start planning...
+2023-08-25 15:50:24,652 - main.py[line:291] - DEBUG: it cost 15.87 s
+2023-08-25 15:50:24,846 - main.py[line:350] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-08-25 15:50:24,847 - main.py[line:351] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-08-25 15:50:27,475 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:50:27,510 - main.py[line:204] - DEBUG: Round.12/74 start planning...
+2023-08-25 15:50:33,860 - main.py[line:291] - DEBUG: it cost 6.35 s
+2023-08-25 15:50:40,818 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 15:50:43,956 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:50:44,001 - main.py[line:204] - DEBUG: Round.13/74 start planning...
+2023-08-25 15:50:52,202 - main.py[line:291] - DEBUG: it cost 8.20 s
+2023-08-25 15:50:54,988 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:50:55,021 - main.py[line:204] - DEBUG: Round.14/74 start planning...
+2023-08-25 15:51:05,986 - main.py[line:291] - DEBUG: it cost 10.96 s
+2023-08-25 15:51:09,147 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:51:09,177 - main.py[line:204] - DEBUG: Round.15/74 start planning...
+2023-08-25 15:51:18,097 - main.py[line:291] - DEBUG: it cost 8.92 s
+2023-08-25 15:51:20,979 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:51:21,008 - main.py[line:204] - DEBUG: Round.16/74 start planning...
+2023-08-25 15:51:26,275 - main.py[line:291] - DEBUG: it cost 5.27 s
+2023-08-25 15:51:30,745 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:51:30,794 - main.py[line:204] - DEBUG: Round.17/74 start planning...
+2023-08-25 15:51:37,881 - main.py[line:291] - DEBUG: it cost 7.08 s
+2023-08-25 15:51:40,809 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:51:40,843 - main.py[line:204] - DEBUG: Round.18/74 start planning...
+2023-08-25 15:51:47,089 - main.py[line:291] - DEBUG: it cost 6.24 s
+2023-08-25 15:51:50,183 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:51:50,225 - main.py[line:204] - DEBUG: Round.19/74 start planning...
+2023-08-25 15:51:54,987 - main.py[line:291] - DEBUG: it cost 4.76 s
+2023-08-25 15:51:59,343 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:51:59,400 - main.py[line:204] - DEBUG: Round.20/74 start planning...
+2023-08-25 15:52:04,295 - main.py[line:291] - DEBUG: it cost 4.89 s
+2023-08-25 15:52:08,130 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:52:08,158 - main.py[line:204] - DEBUG: Round.21/74 start planning...
+2023-08-25 15:52:16,932 - main.py[line:291] - DEBUG: it cost 8.77 s
+2023-08-25 15:52:19,843 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:52:19,875 - main.py[line:204] - DEBUG: Round.22/74 start planning...
+2023-08-25 15:52:39,942 - main.py[line:291] - DEBUG: it cost 20.07 s
+2023-08-25 15:52:40,172 - main.py[line:350] - INFO: *****************NO.2 码垛面 结束！*****************
+2023-08-25 15:52:40,173 - main.py[line:351] - INFO: *****************NO.3 码垛面 开始！*****************
+2023-08-25 15:52:42,950 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:52:42,980 - main.py[line:204] - DEBUG: Round.23/74 start planning...
+2023-08-25 15:52:50,307 - main.py[line:291] - DEBUG: it cost 7.33 s
+2023-08-25 15:52:57,233 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 15:53:00,136 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:53:00,161 - main.py[line:204] - DEBUG: Round.24/74 start planning...
+2023-08-25 15:53:07,569 - main.py[line:291] - DEBUG: it cost 7.41 s
+2023-08-25 15:53:10,543 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:53:10,577 - main.py[line:204] - DEBUG: Round.25/74 start planning...
+2023-08-25 15:53:22,640 - main.py[line:291] - DEBUG: it cost 12.06 s
+2023-08-25 15:53:25,625 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:53:25,652 - main.py[line:204] - DEBUG: Round.26/74 start planning...
+2023-08-25 15:53:41,170 - main.py[line:291] - DEBUG: it cost 15.52 s
+2023-08-25 15:53:44,077 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:53:44,104 - main.py[line:204] - DEBUG: Round.27/74 start planning...
+2023-08-25 15:53:48,519 - main.py[line:291] - DEBUG: it cost 4.41 s
+2023-08-25 15:53:53,930 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:53:53,975 - main.py[line:204] - DEBUG: Round.28/74 start planning...
+2023-08-25 15:54:00,138 - main.py[line:291] - DEBUG: it cost 6.16 s
+2023-08-25 15:54:03,407 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:54:03,458 - main.py[line:204] - DEBUG: Round.29/74 start planning...
+2023-08-25 15:54:12,059 - main.py[line:291] - DEBUG: it cost 8.60 s
+2023-08-25 15:54:14,965 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:54:14,993 - main.py[line:204] - DEBUG: Round.30/74 start planning...
+2023-08-25 15:54:18,485 - main.py[line:291] - DEBUG: it cost 3.49 s
+2023-08-25 15:54:23,857 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:54:23,888 - main.py[line:204] - DEBUG: Round.31/74 start planning...
+2023-08-25 15:54:28,546 - main.py[line:291] - DEBUG: it cost 4.66 s
+2023-08-25 15:54:32,400 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:54:32,441 - main.py[line:204] - DEBUG: Round.32/74 start planning...
+2023-08-25 15:54:43,836 - main.py[line:291] - DEBUG: it cost 11.39 s
+2023-08-25 15:54:46,735 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:54:46,763 - main.py[line:204] - DEBUG: Round.33/74 start planning...
+2023-08-25 15:55:01,129 - main.py[line:291] - DEBUG: it cost 14.37 s
+2023-08-25 15:55:01,373 - main.py[line:350] - INFO: *****************NO.3 码垛面 结束！*****************
+2023-08-25 15:55:01,374 - main.py[line:351] - INFO: *****************NO.4 码垛面 开始！*****************
+2023-08-25 15:55:03,987 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:55:04,018 - main.py[line:204] - DEBUG: Round.34/74 start planning...
+2023-08-25 15:55:10,836 - main.py[line:291] - DEBUG: it cost 6.82 s
+2023-08-25 15:55:17,730 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 15:55:20,800 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:55:20,850 - main.py[line:204] - DEBUG: Round.35/74 start planning...
+2023-08-25 15:55:34,481 - main.py[line:291] - DEBUG: it cost 13.63 s
+2023-08-25 15:55:37,423 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:55:37,461 - main.py[line:204] - DEBUG: Round.36/74 start planning...
+2023-08-25 15:55:48,422 - main.py[line:291] - DEBUG: it cost 10.96 s
+2023-08-25 15:55:51,596 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:55:51,639 - main.py[line:204] - DEBUG: Round.37/74 start planning...
+2023-08-25 15:56:02,080 - main.py[line:291] - DEBUG: it cost 10.44 s
+2023-08-25 15:56:05,108 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:56:05,147 - main.py[line:204] - DEBUG: Round.38/74 start planning...
+2023-08-25 15:56:13,750 - main.py[line:291] - DEBUG: it cost 8.60 s
+2023-08-25 15:56:16,720 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:56:16,765 - main.py[line:204] - DEBUG: Round.39/74 start planning...
+2023-08-25 15:56:27,307 - main.py[line:291] - DEBUG: it cost 10.54 s
+2023-08-25 15:56:30,395 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:56:30,440 - main.py[line:204] - DEBUG: Round.40/74 start planning...
+2023-08-25 15:56:41,042 - main.py[line:291] - DEBUG: it cost 10.60 s
+2023-08-25 15:56:43,980 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:56:44,007 - main.py[line:204] - DEBUG: Round.41/74 start planning...
+2023-08-25 15:56:50,392 - main.py[line:291] - DEBUG: it cost 6.38 s
+2023-08-25 15:56:53,645 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:56:53,688 - main.py[line:204] - DEBUG: Round.42/74 start planning...
+2023-08-25 15:57:01,983 - main.py[line:291] - DEBUG: it cost 8.29 s
+2023-08-25 15:57:04,964 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:57:05,004 - main.py[line:204] - DEBUG: Round.43/74 start planning...
+2023-08-25 15:57:14,109 - main.py[line:291] - DEBUG: it cost 9.10 s
+2023-08-25 15:57:17,058 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:57:17,086 - main.py[line:204] - DEBUG: Round.44/74 start planning...
+2023-08-25 15:57:34,482 - main.py[line:291] - DEBUG: it cost 17.39 s
+2023-08-25 15:57:34,733 - main.py[line:350] - INFO: *****************NO.4 码垛面 结束！*****************
+2023-08-25 15:57:34,734 - main.py[line:351] - INFO: *****************NO.5 码垛面 开始！*****************
+2023-08-25 15:57:37,497 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:57:37,520 - main.py[line:204] - DEBUG: Round.45/74 start planning...
+2023-08-25 15:57:48,680 - main.py[line:291] - DEBUG: it cost 11.16 s
+2023-08-25 15:57:55,665 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 15:57:58,660 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:57:58,697 - main.py[line:204] - DEBUG: Round.46/74 start planning...
+2023-08-25 15:58:05,146 - main.py[line:291] - DEBUG: it cost 6.45 s
+2023-08-25 15:58:08,913 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:58:08,944 - main.py[line:204] - DEBUG: Round.47/74 start planning...
+2023-08-25 15:58:15,471 - main.py[line:291] - DEBUG: it cost 6.53 s
+2023-08-25 15:58:19,098 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:58:19,136 - main.py[line:204] - DEBUG: Round.48/74 start planning...
+2023-08-25 15:58:25,420 - main.py[line:291] - DEBUG: it cost 6.28 s
+2023-08-25 15:58:29,119 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:58:29,166 - main.py[line:204] - DEBUG: Round.49/74 start planning...
+2023-08-25 15:58:33,544 - main.py[line:291] - DEBUG: it cost 4.38 s
+2023-08-25 15:58:39,025 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:58:39,068 - main.py[line:204] - DEBUG: Round.50/74 start planning...
+2023-08-25 15:58:45,238 - main.py[line:291] - DEBUG: it cost 6.17 s
+2023-08-25 15:58:48,529 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:58:48,562 - main.py[line:204] - DEBUG: Round.51/74 start planning...
+2023-08-25 15:58:53,913 - main.py[line:291] - DEBUG: it cost 5.35 s
+2023-08-25 15:58:57,224 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:58:57,263 - main.py[line:204] - DEBUG: Round.52/74 start planning...
+2023-08-25 15:59:01,585 - main.py[line:291] - DEBUG: it cost 4.32 s
+2023-08-25 15:59:06,308 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:59:06,337 - main.py[line:204] - DEBUG: Round.53/74 start planning...
+2023-08-25 15:59:13,449 - main.py[line:291] - DEBUG: it cost 7.11 s
+2023-08-25 15:59:16,323 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:59:16,352 - main.py[line:204] - DEBUG: Round.54/74 start planning...
+2023-08-25 15:59:25,913 - main.py[line:291] - DEBUG: it cost 9.56 s
+2023-08-25 15:59:28,832 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 15:59:28,859 - main.py[line:204] - DEBUG: Round.55/74 start planning...
+2023-08-25 15:59:44,046 - main.py[line:291] - DEBUG: it cost 15.19 s
+2023-08-25 15:59:44,335 - main.py[line:350] - INFO: *****************NO.5 码垛面 结束！*****************
+2023-08-25 15:59:44,336 - main.py[line:351] - INFO: *****************NO.6 码垛面 开始！*****************
+2023-08-25 15:59:46,894 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 15:59:46,927 - main.py[line:204] - DEBUG: Round.56/74 start planning...
+2023-08-25 15:59:55,505 - main.py[line:291] - DEBUG: it cost 8.58 s
+2023-08-25 16:00:02,452 - main.py[line:168] - DEBUG: 单面码垛放置次数：11
+2023-08-25 16:00:05,265 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:00:05,298 - main.py[line:204] - DEBUG: Round.57/74 start planning...
+2023-08-25 16:00:14,369 - main.py[line:291] - DEBUG: it cost 9.07 s
+2023-08-25 16:00:17,129 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:00:17,162 - main.py[line:204] - DEBUG: Round.58/74 start planning...
+2023-08-25 16:00:25,532 - main.py[line:291] - DEBUG: it cost 8.37 s
+2023-08-25 16:00:28,455 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:00:28,488 - main.py[line:204] - DEBUG: Round.59/74 start planning...
+2023-08-25 16:00:35,940 - main.py[line:291] - DEBUG: it cost 7.45 s
+2023-08-25 16:00:38,922 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:00:38,953 - main.py[line:204] - DEBUG: Round.60/74 start planning...
+2023-08-25 16:00:50,670 - main.py[line:291] - DEBUG: it cost 11.72 s
+2023-08-25 16:00:53,436 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:00:53,471 - main.py[line:204] - DEBUG: Round.61/74 start planning...
+2023-08-25 16:01:00,806 - main.py[line:291] - DEBUG: it cost 7.33 s
+2023-08-25 16:01:03,686 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:01:03,725 - main.py[line:204] - DEBUG: Round.62/74 start planning...
+2023-08-25 16:01:08,436 - main.py[line:291] - DEBUG: it cost 4.71 s
+2023-08-25 16:01:12,450 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:01:12,477 - main.py[line:204] - DEBUG: Round.63/74 start planning...
+2023-08-25 16:01:15,716 - main.py[line:291] - DEBUG: it cost 3.24 s
+2023-08-25 16:01:21,334 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:01:21,383 - main.py[line:204] - DEBUG: Round.64/74 start planning...
+2023-08-25 16:01:33,437 - main.py[line:291] - DEBUG: it cost 12.05 s
+2023-08-25 16:01:36,304 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:01:36,337 - main.py[line:204] - DEBUG: Round.65/74 start planning...
+2023-08-25 16:01:44,384 - main.py[line:291] - DEBUG: it cost 8.04 s
+2023-08-25 16:01:47,269 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:01:47,302 - main.py[line:204] - DEBUG: Round.66/74 start planning...
+2023-08-25 16:02:01,203 - main.py[line:291] - DEBUG: it cost 13.90 s
+2023-08-25 16:02:01,487 - main.py[line:350] - INFO: *****************NO.6 码垛面 结束！*****************
+2023-08-25 16:02:01,488 - main.py[line:351] - INFO: *****************NO.7 码垛面 开始！*****************
+2023-08-25 16:02:04,052 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:02:04,085 - main.py[line:204] - DEBUG: Round.67/74 start planning...
+2023-08-25 16:02:15,382 - main.py[line:291] - DEBUG: it cost 11.30 s
+2023-08-25 16:02:22,334 - main.py[line:168] - DEBUG: 单面码垛放置次数：8
+2023-08-25 16:02:25,333 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:02:25,373 - main.py[line:204] - DEBUG: Round.68/74 start planning...
+2023-08-25 16:02:34,314 - main.py[line:291] - DEBUG: it cost 8.94 s
+2023-08-25 16:02:37,218 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:02:37,246 - main.py[line:204] - DEBUG: Round.69/74 start planning...
+2023-08-25 16:02:43,157 - main.py[line:291] - DEBUG: it cost 5.91 s
+2023-08-25 16:02:47,274 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:02:47,325 - main.py[line:204] - DEBUG: Round.70/74 start planning...
+2023-08-25 16:02:53,821 - main.py[line:291] - DEBUG: it cost 6.49 s
+2023-08-25 16:02:57,115 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:02:57,164 - main.py[line:204] - DEBUG: Round.71/74 start planning...
+2023-08-25 16:03:01,995 - main.py[line:291] - DEBUG: it cost 4.83 s
+2023-08-25 16:03:06,167 - main.py[line:197] - DEBUG: 来料箱子配方号：4
+2023-08-25 16:03:06,201 - main.py[line:204] - DEBUG: Round.72/74 start planning...
+2023-08-25 16:03:10,545 - main.py[line:291] - DEBUG: it cost 4.34 s
+2023-08-25 16:03:15,226 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:03:15,270 - main.py[line:204] - DEBUG: Round.73/74 start planning...
+2023-08-25 16:03:20,006 - main.py[line:291] - DEBUG: it cost 4.73 s
+2023-08-25 16:03:23,295 - main.py[line:197] - DEBUG: 来料箱子配方号：2
+2023-08-25 16:03:23,341 - main.py[line:204] - DEBUG: Round.74/74 start planning...
+2023-08-25 16:03:41,204 - main.py[line:291] - DEBUG: it cost 17.86 s
+2023-08-25 16:03:41,424 - main.py[line:353] - INFO: *****************NO.7 码垛面 结束！*****************
+2023-08-25 16:03:41,426 - main.py[line:354] - INFO: 码垛路径规划结束!

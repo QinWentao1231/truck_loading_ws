@@ -1,0 +1,28 @@
+2023-10-20 15:50:01,607 - main.py[line:55] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-20 15:50:01,608 - main.py[line:70] - INFO: 读取参数文件成功！
+2023-10-20 15:50:01,609 - main.py[line:77] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/
+2023-10-20 15:50:22,470 - main.py[line:84] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/testblock_t_60.pkl
+2023-10-20 15:50:22,471 - main.py[line:103] - INFO: 等待机器人连接中...
+2023-10-20 15:50:51,685 - main.py[line:111] - INFO: 连接机器人成功！
+2023-10-20 15:50:51,686 - main.py[line:114] - INFO: 码垛环境初始化成功！
+2023-10-20 16:10:27,923 - main.py[line:55] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-20 16:10:27,923 - main.py[line:70] - INFO: 读取参数文件成功！
+2023-10-20 16:10:27,923 - main.py[line:77] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/
+2023-10-20 16:10:48,634 - main.py[line:84] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/testblock_t_60.pkl
+2023-10-20 16:10:48,634 - main.py[line:103] - INFO: 等待机器人连接中...
+2023-10-20 16:11:26,585 - main.py[line:111] - INFO: 连接机器人成功！
+2023-10-20 16:11:26,585 - main.py[line:114] - INFO: 码垛环境初始化成功！
+2023-10-20 16:27:22,882 - main.py[line:55] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-20 16:27:22,882 - main.py[line:70] - INFO: 读取参数文件成功！
+2023-10-20 16:27:22,882 - main.py[line:77] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/
+2023-10-20 16:27:34,428 - main.py[line:84] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/testblock_t_60.pkl
+2023-10-20 16:27:34,428 - main.py[line:103] - INFO: 等待机器人连接中...
+2023-10-20 16:27:54,221 - main.py[line:111] - INFO: 连接机器人成功！
+2023-10-20 16:27:54,221 - main.py[line:114] - INFO: 码垛环境初始化成功！
+2023-10-20 16:31:56,341 - main.py[line:55] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-20 16:31:56,341 - main.py[line:70] - INFO: 读取参数文件成功！
+2023-10-20 16:31:56,341 - main.py[line:77] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/
+2023-10-20 16:32:11,515 - main.py[line:84] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D/pkl_data/testblock_t_60.pkl
+2023-10-20 16:32:11,515 - main.py[line:103] - INFO: 等待机器人连接中...
+2023-10-20 16:32:30,860 - main.py[line:111] - INFO: 连接机器人成功！
+2023-10-20 16:32:30,860 - main.py[line:114] - INFO: 码垛环境初始化成功！

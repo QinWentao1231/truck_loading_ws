@@ -1,0 +1,420 @@
+2023-10-08 11:10:16,854 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 11:10:16,855 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 11:10:16,855 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 11:10:38,925 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 11:10:38,925 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 11:53:40,815 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 11:53:40,818 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 11:53:40,819 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 11:54:03,506 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_1.pkl
+2023-10-08 11:54:03,507 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 11:56:05,996 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 11:56:05,997 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 11:56:05,999 - main.py[line:113] - ERROR: string indices must be integers
+2023-10-08 11:56:06,001 - main.py[line:114] - ERROR: 垛序计算失败，请检查垛型数据
+2023-10-08 11:57:34,896 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 11:57:34,898 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 11:57:34,898 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 11:57:50,406 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 11:57:50,407 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 11:58:41,315 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 11:58:41,316 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 11:58:41,317 - main.py[line:113] - ERROR: string indices must be integers
+2023-10-08 11:58:41,318 - main.py[line:114] - ERROR: 垛序计算失败，请检查垛型数据
+2023-10-08 11:58:56,305 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 11:58:56,306 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 11:58:56,307 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 11:59:06,317 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_800_123.pkl
+2023-10-08 11:59:06,318 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 12:00:24,476 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 12:00:24,477 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 12:00:24,480 - main.py[line:113] - ERROR: string indices must be integers
+2023-10-08 12:00:24,481 - main.py[line:114] - ERROR: 垛序计算失败，请检查垛型数据
+2023-10-08 12:01:09,591 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 12:01:09,592 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 12:01:09,592 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 12:01:26,518 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 12:01:26,518 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 12:01:40,948 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 12:01:40,949 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 12:01:40,951 - main.py[line:113] - ERROR: string indices must be integers
+2023-10-08 12:01:40,952 - main.py[line:114] - ERROR: 垛序计算失败，请检查垛型数据
+2023-10-08 12:02:06,093 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 12:02:06,094 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 12:02:06,095 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 12:02:17,530 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 12:02:17,530 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 12:02:27,077 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 12:02:27,078 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 12:06:53,620 - main.py[line:113] - ERROR: string indices must be integers
+2023-10-08 12:06:53,622 - main.py[line:114] - ERROR: 垛序计算失败，请检查垛型数据
+2023-10-08 12:07:57,531 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 12:07:57,532 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 12:07:57,532 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 12:08:07,080 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 12:08:07,081 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 12:08:18,512 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 12:08:18,514 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 12:52:34,395 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 12:52:34,395 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 12:52:34,397 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 12:52:44,937 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 12:52:44,938 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 12:53:51,233 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 12:53:51,235 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 12:53:51,236 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 12:58:19,713 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 13:05:42,518 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 13:06:19,779 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 13:43:09,209 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 13:48:15,625 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 13:48:15,626 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 13:48:21,164 - main.py[line:317] - DEBUG: it cost 5.54 s
+2023-10-08 13:55:08,104 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 13:55:08,105 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 13:55:08,106 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 13:55:22,250 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 13:55:22,252 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 13:56:25,490 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 13:56:25,492 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 13:56:25,493 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 13:56:25,517 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 13:59:12,336 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 13:59:42,650 - main.py[line:382] - WARNING: 机器人已断开连接 ！
+2023-10-08 13:59:42,650 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 13:59:43,659 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 13:59:43,660 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 14:00:08,559 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 14:00:08,560 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 14:00:08,561 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 14:00:08,606 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 14:00:13,915 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 14:00:13,999 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 14:00:14,082 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 14:00:14,083 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 14:00:21,562 - main.py[line:317] - DEBUG: it cost 7.48 s
+2023-10-08 14:06:40,523 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 14:06:40,524 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 14:06:40,524 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 14:07:23,093 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 14:07:23,094 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 14:07:49,121 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 14:07:49,122 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 14:07:49,123 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 14:07:49,159 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 14:07:54,459 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 14:07:54,545 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 14:07:54,623 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 14:07:54,624 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 14:08:01,072 - main.py[line:317] - DEBUG: it cost 6.45 s
+2023-10-08 14:09:07,929 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 14:09:08,035 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 14:09:13,999 - main.py[line:317] - DEBUG: it cost 5.96 s
+2023-10-08 14:30:12,763 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 14:30:12,764 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 14:30:12,764 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 14:30:24,362 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 14:30:24,363 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 14:38:56,609 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 14:38:56,611 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 14:38:56,612 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 14:38:56,646 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽258 高578
+2023-10-08 14:39:02,951 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 14:39:03,030 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 14:39:03,110 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 14:39:03,111 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 14:39:09,555 - main.py[line:317] - DEBUG: it cost 6.44 s
+2023-10-08 14:39:58,259 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 14:39:58,361 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 14:40:05,016 - main.py[line:317] - DEBUG: it cost 6.65 s
+2023-10-08 14:49:46,006 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 14:49:46,116 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 14:49:55,411 - main.py[line:317] - DEBUG: it cost 9.29 s
+2023-10-08 14:52:53,200 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 14:52:53,312 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 14:53:06,845 - main.py[line:317] - DEBUG: it cost 13.53 s
+2023-10-08 15:16:25,221 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 15:16:25,223 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 15:16:25,224 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 15:16:47,687 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 15:16:47,688 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 15:18:47,118 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 15:18:47,119 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 15:18:47,120 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 15:18:47,163 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽263 高578
+2023-10-08 15:18:53,486 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 15:18:53,563 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 15:18:53,652 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 15:18:53,653 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 15:19:01,867 - main.py[line:317] - DEBUG: it cost 8.21 s
+2023-10-08 15:19:16,447 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 15:19:28,009 - main.py[line:317] - DEBUG: it cost 11.56 s
+2023-10-08 15:19:47,776 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 15:19:51,240 - main.py[line:317] - DEBUG: it cost 3.46 s
+2023-10-08 15:20:10,098 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 15:20:16,252 - main.py[line:317] - DEBUG: it cost 6.15 s
+2023-10-08 15:20:53,278 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 15:20:53,380 - main.py[line:230] - DEBUG: Round.5/27 start planning...
+2023-10-08 15:20:58,062 - main.py[line:317] - DEBUG: it cost 4.68 s
+2023-10-08 15:30:17,488 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 15:30:17,490 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 15:30:17,490 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 15:30:44,500 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 15:30:44,501 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 15:31:43,604 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 15:31:43,605 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 15:31:43,606 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 15:31:43,685 - main.py[line:160] - DEBUG: 总箱数: 84, 码垛面数：3, 箱子尺寸：长458 宽260 高583
+2023-10-08 15:31:50,004 - main.py[line:189] - DEBUG: 单面码垛放置次数：9
+2023-10-08 15:31:50,081 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 15:31:50,163 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 15:31:50,164 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 15:31:56,758 - main.py[line:317] - DEBUG: it cost 6.59 s
+2023-10-08 15:32:02,470 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 15:32:08,991 - main.py[line:317] - DEBUG: it cost 6.52 s
+2023-10-08 15:32:14,378 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 15:32:20,013 - main.py[line:317] - DEBUG: it cost 5.63 s
+2023-10-08 15:32:24,991 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 15:32:31,910 - main.py[line:317] - DEBUG: it cost 6.92 s
+2023-10-08 15:32:41,555 - main.py[line:230] - DEBUG: Round.5/27 start planning...
+2023-10-08 15:32:46,882 - main.py[line:317] - DEBUG: it cost 5.33 s
+2023-10-08 15:35:42,736 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 15:35:42,851 - main.py[line:230] - DEBUG: Round.6/27 start planning...
+2023-10-08 15:35:45,401 - main.py[line:317] - DEBUG: it cost 2.55 s
+2023-10-08 15:41:07,385 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 15:41:07,489 - main.py[line:230] - DEBUG: Round.7/27 start planning...
+2023-10-08 15:41:13,542 - main.py[line:317] - DEBUG: it cost 6.05 s
+2023-10-08 15:52:32,629 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 15:52:32,631 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 15:52:32,631 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 15:55:05,510 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 15:55:05,510 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 15:55:41,091 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 15:55:41,092 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 15:55:41,093 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 15:55:54,054 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 15:55:54,056 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 15:55:59,812 - main.py[line:317] - DEBUG: it cost 5.76 s
+2023-10-08 15:56:02,615 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 15:56:09,193 - main.py[line:317] - DEBUG: it cost 6.58 s
+2023-10-08 15:56:12,448 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 15:56:19,581 - main.py[line:317] - DEBUG: it cost 7.13 s
+2023-10-08 15:59:15,014 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 15:59:15,016 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 15:59:15,017 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 15:59:26,964 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 15:59:26,964 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 15:59:47,846 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 15:59:47,847 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 15:59:47,848 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 15:59:55,232 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 15:59:55,234 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 16:00:05,845 - main.py[line:317] - DEBUG: it cost 10.61 s
+2023-10-08 16:00:14,946 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 16:00:26,063 - main.py[line:317] - DEBUG: it cost 11.12 s
+2023-10-08 16:00:30,131 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 16:00:38,922 - main.py[line:317] - DEBUG: it cost 8.79 s
+2023-10-08 16:01:37,377 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 16:01:43,358 - main.py[line:317] - DEBUG: it cost 5.98 s
+2023-10-08 16:01:48,097 - main.py[line:230] - DEBUG: Round.5/27 start planning...
+2023-10-08 16:01:52,271 - main.py[line:317] - DEBUG: it cost 4.17 s
+2023-10-08 16:01:57,307 - main.py[line:230] - DEBUG: Round.6/27 start planning...
+2023-10-08 16:02:19,048 - main.py[line:317] - DEBUG: it cost 21.74 s
+2023-10-08 16:02:59,283 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 16:02:59,285 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 16:02:59,285 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 16:03:11,624 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 16:03:11,625 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 16:03:24,095 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 16:03:24,096 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 16:03:24,097 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 16:03:30,622 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 16:03:30,623 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 16:03:43,648 - main.py[line:317] - DEBUG: it cost 13.02 s
+2023-10-08 16:03:49,307 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 16:03:57,213 - main.py[line:317] - DEBUG: it cost 7.90 s
+2023-10-08 16:04:00,938 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 16:04:06,528 - main.py[line:317] - DEBUG: it cost 5.59 s
+2023-10-08 16:05:13,221 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 16:05:13,223 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 16:05:13,223 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 16:05:25,163 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 16:05:25,165 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 16:05:45,281 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 16:05:45,282 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 16:05:45,282 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 16:05:59,200 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:06:02,733 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 16:06:05,021 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 16:06:07,987 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:06:12,699 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 16:06:15,840 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 16:06:23,587 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:06:49,828 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 16:06:49,828 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 16:06:56,059 - main.py[line:317] - DEBUG: it cost 6.23 s
+2023-10-08 16:06:59,132 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 16:07:05,586 - main.py[line:317] - DEBUG: it cost 6.45 s
+2023-10-08 16:07:08,748 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 16:07:20,815 - main.py[line:317] - DEBUG: it cost 12.06 s
+2023-10-08 16:07:24,152 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 16:07:29,567 - main.py[line:317] - DEBUG: it cost 5.41 s
+2023-10-08 16:07:32,347 - main.py[line:230] - DEBUG: Round.5/27 start planning...
+2023-10-08 16:07:38,368 - main.py[line:317] - DEBUG: it cost 6.02 s
+2023-10-08 16:07:41,388 - main.py[line:230] - DEBUG: Round.6/27 start planning...
+2023-10-08 16:07:49,411 - main.py[line:317] - DEBUG: it cost 8.02 s
+2023-10-08 16:07:54,262 - main.py[line:230] - DEBUG: Round.7/27 start planning...
+2023-10-08 16:08:00,858 - main.py[line:317] - DEBUG: it cost 6.60 s
+2023-10-08 16:10:34,746 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 16:13:17,059 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 16:13:17,060 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 16:13:17,060 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 16:13:28,959 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 16:13:28,959 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 16:13:59,931 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 16:13:59,931 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 16:13:59,932 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 16:14:24,643 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 16:14:24,643 - main.py[line:230] - DEBUG: Round.1/27 start planning...
+2023-10-08 16:14:27,828 - main.py[line:317] - DEBUG: it cost 3.18 s
+2023-10-08 16:14:30,936 - main.py[line:230] - DEBUG: Round.2/27 start planning...
+2023-10-08 16:14:35,261 - main.py[line:317] - DEBUG: it cost 4.33 s
+2023-10-08 16:14:39,855 - main.py[line:230] - DEBUG: Round.3/27 start planning...
+2023-10-08 16:14:42,651 - main.py[line:317] - DEBUG: it cost 2.80 s
+2023-10-08 16:14:47,314 - main.py[line:230] - DEBUG: Round.4/27 start planning...
+2023-10-08 16:14:53,054 - main.py[line:317] - DEBUG: it cost 5.74 s
+2023-10-08 16:14:55,103 - main.py[line:230] - DEBUG: Round.5/27 start planning...
+2023-10-08 16:14:57,785 - main.py[line:317] - DEBUG: it cost 2.68 s
+2023-10-08 16:15:01,112 - main.py[line:230] - DEBUG: Round.6/27 start planning...
+2023-10-08 16:15:05,472 - main.py[line:317] - DEBUG: it cost 4.36 s
+2023-10-08 16:15:12,063 - main.py[line:230] - DEBUG: Round.7/27 start planning...
+2023-10-08 16:15:15,333 - main.py[line:317] - DEBUG: it cost 3.27 s
+2023-10-08 16:19:07,675 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:20:08,553 - main.py[line:230] - DEBUG: Round.8/27 start planning...
+2023-10-08 16:20:11,574 - main.py[line:317] - DEBUG: it cost 3.02 s
+2023-10-08 16:24:26,989 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 16:24:36,821 - main.py[line:230] - DEBUG: Round.9/27 start planning...
+2023-10-08 16:24:45,569 - main.py[line:317] - DEBUG: it cost 8.75 s
+2023-10-08 16:24:45,689 - main.py[line:375] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-10-08 16:24:45,689 - main.py[line:376] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-10-08 16:26:31,281 - main.py[line:385] - ERROR: 网络连接异常中断
+2023-10-08 16:32:52,941 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 16:32:52,941 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 16:32:52,942 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 16:33:04,109 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 16:33:04,110 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 16:33:26,507 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 16:33:26,507 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 16:33:26,507 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 16:33:35,191 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 16:33:35,191 - main.py[line:230] - DEBUG: Round.1/36 start planning...
+2023-10-08 16:33:40,131 - main.py[line:317] - DEBUG: it cost 4.94 s
+2023-10-08 16:33:43,145 - main.py[line:230] - DEBUG: Round.2/36 start planning...
+2023-10-08 16:33:46,426 - main.py[line:317] - DEBUG: it cost 3.28 s
+2023-10-08 16:33:50,267 - main.py[line:230] - DEBUG: Round.3/36 start planning...
+2023-10-08 16:33:53,692 - main.py[line:317] - DEBUG: it cost 3.43 s
+2023-10-08 16:33:57,503 - main.py[line:230] - DEBUG: Round.4/36 start planning...
+2023-10-08 16:34:01,857 - main.py[line:317] - DEBUG: it cost 4.35 s
+2023-10-08 16:34:05,151 - main.py[line:230] - DEBUG: Round.5/36 start planning...
+2023-10-08 16:34:09,444 - main.py[line:317] - DEBUG: it cost 4.29 s
+2023-10-08 16:34:12,417 - main.py[line:230] - DEBUG: Round.6/36 start planning...
+2023-10-08 16:34:15,444 - main.py[line:317] - DEBUG: it cost 3.03 s
+2023-10-08 16:34:18,865 - main.py[line:230] - DEBUG: Round.7/36 start planning...
+2023-10-08 16:34:23,425 - main.py[line:317] - DEBUG: it cost 4.56 s
+2023-10-08 16:34:27,951 - main.py[line:230] - DEBUG: Round.8/36 start planning...
+2023-10-08 16:34:32,853 - main.py[line:317] - DEBUG: it cost 4.90 s
+2023-10-08 16:34:35,865 - main.py[line:230] - DEBUG: Round.9/36 start planning...
+2023-10-08 16:34:45,571 - main.py[line:317] - DEBUG: it cost 9.71 s
+2023-10-08 16:34:49,873 - main.py[line:230] - DEBUG: Round.10/36 start planning...
+2023-10-08 16:35:17,762 - main.py[line:317] - DEBUG: it cost 27.89 s
+2023-10-08 16:37:24,100 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:39:16,684 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 16:39:16,685 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 16:39:16,685 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 16:39:25,604 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-10-08 16:39:25,605 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 16:39:38,493 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 16:39:38,494 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 16:39:38,494 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 16:39:49,755 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 16:39:49,755 - main.py[line:230] - DEBUG: Round.1/36 start planning...
+2023-10-08 16:39:53,579 - main.py[line:317] - DEBUG: it cost 3.82 s
+2023-10-08 16:39:56,227 - main.py[line:230] - DEBUG: Round.2/36 start planning...
+2023-10-08 16:40:01,014 - main.py[line:317] - DEBUG: it cost 4.79 s
+2023-10-08 16:40:04,141 - main.py[line:230] - DEBUG: Round.3/36 start planning...
+2023-10-08 16:40:07,716 - main.py[line:317] - DEBUG: it cost 3.58 s
+2023-10-08 16:40:11,115 - main.py[line:230] - DEBUG: Round.4/36 start planning...
+2023-10-08 16:40:14,432 - main.py[line:317] - DEBUG: it cost 3.32 s
+2023-10-08 16:40:17,468 - main.py[line:230] - DEBUG: Round.5/36 start planning...
+2023-10-08 16:40:20,172 - main.py[line:317] - DEBUG: it cost 2.70 s
+2023-10-08 16:40:23,024 - main.py[line:230] - DEBUG: Round.6/36 start planning...
+2023-10-08 16:40:28,291 - main.py[line:317] - DEBUG: it cost 5.27 s
+2023-10-08 16:40:31,273 - main.py[line:230] - DEBUG: Round.7/36 start planning...
+2023-10-08 16:40:34,511 - main.py[line:317] - DEBUG: it cost 3.24 s
+2023-10-08 16:40:37,505 - main.py[line:230] - DEBUG: Round.8/36 start planning...
+2023-10-08 16:40:40,124 - main.py[line:317] - DEBUG: it cost 2.62 s
+2023-10-08 16:40:43,017 - main.py[line:230] - DEBUG: Round.9/36 start planning...
+2023-10-08 16:40:55,468 - main.py[line:317] - DEBUG: it cost 12.45 s
+2023-10-08 16:40:58,877 - main.py[line:230] - DEBUG: Round.10/36 start planning...
+2023-10-08 16:41:02,355 - main.py[line:317] - DEBUG: it cost 3.48 s
+2023-10-08 16:43:35,654 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 16:43:57,422 - main.py[line:230] - DEBUG: Round.11/36 start planning...
+2023-10-08 16:44:00,670 - main.py[line:317] - DEBUG: it cost 3.25 s
+2023-10-08 16:51:12,964 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 16:51:29,543 - main.py[line:230] - DEBUG: Round.12/36 start planning...
+2023-10-08 16:51:34,745 - main.py[line:317] - DEBUG: it cost 5.20 s
+2023-10-08 16:51:34,868 - main.py[line:375] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-10-08 16:51:34,868 - main.py[line:376] - INFO: *****************NO.2 码垛面 开始！*****************
+2023-10-08 17:09:41,877 - main.py[line:47] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-10-08 17:09:41,878 - main.py[line:62] - INFO: 读取参数文件成功！
+2023-10-08 17:09:41,878 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 17:09:54,658 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_1.pkl
+2023-10-08 17:09:54,658 - main.py[line:95] - INFO: 等待机器人连接中...
+2023-10-08 17:11:24,327 - main.py[line:103] - INFO: 连接机器人成功！
+2023-10-08 17:11:24,327 - main.py[line:106] - INFO: 码垛环境初始化成功！
+2023-10-08 17:11:24,327 - main.py[line:111] - INFO: 计算垛序成功！
+2023-10-08 17:11:24,364 - main.py[line:160] - DEBUG: 总箱数: 55, 码垛面数：1, 箱子尺寸：长458 宽260 高583
+2023-10-08 17:11:30,663 - main.py[line:189] - DEBUG: 单面码垛放置次数：12
+2023-10-08 17:11:30,741 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 17:11:30,829 - main.py[line:229] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-10-08 17:11:30,829 - main.py[line:230] - DEBUG: Round.1/12 start planning...
+2023-10-08 17:11:37,022 - main.py[line:317] - DEBUG: it cost 6.19 s
+2023-10-08 17:12:06,775 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 17:12:06,885 - main.py[line:230] - DEBUG: Round.2/12 start planning...
+2023-10-08 17:12:11,177 - main.py[line:317] - DEBUG: it cost 4.29 s
+2023-10-08 17:13:31,778 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 17:13:31,890 - main.py[line:230] - DEBUG: Round.3/12 start planning...
+2023-10-08 17:13:35,040 - main.py[line:317] - DEBUG: it cost 3.15 s
+2023-10-08 17:14:34,250 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 17:14:34,362 - main.py[line:230] - DEBUG: Round.4/12 start planning...
+2023-10-08 17:14:37,829 - main.py[line:317] - DEBUG: it cost 3.47 s
+2023-10-08 17:15:54,680 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 17:15:54,787 - main.py[line:230] - DEBUG: Round.5/12 start planning...
+2023-10-08 17:16:00,500 - main.py[line:317] - DEBUG: it cost 5.71 s
+2023-10-08 17:16:46,723 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 17:16:46,838 - main.py[line:230] - DEBUG: Round.6/12 start planning...
+2023-10-08 17:16:51,230 - main.py[line:317] - DEBUG: it cost 4.39 s
+2023-10-08 17:17:28,082 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 17:17:28,185 - main.py[line:230] - DEBUG: Round.7/12 start planning...
+2023-10-08 17:17:30,771 - main.py[line:317] - DEBUG: it cost 2.59 s
+2023-10-08 17:19:21,786 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 17:19:21,896 - main.py[line:230] - DEBUG: Round.8/12 start planning...
+2023-10-08 17:19:24,733 - main.py[line:317] - DEBUG: it cost 2.84 s
+2023-10-08 17:19:50,882 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 17:19:50,996 - main.py[line:230] - DEBUG: Round.9/12 start planning...
+2023-10-08 17:20:00,961 - main.py[line:317] - DEBUG: it cost 9.96 s
+2023-10-08 17:20:18,587 - main.py[line:223] - DEBUG: 来料箱子配方号：2
+2023-10-08 17:20:18,706 - main.py[line:230] - DEBUG: Round.10/12 start planning...
+2023-10-08 17:20:21,826 - main.py[line:317] - DEBUG: it cost 3.12 s
+2023-10-08 17:21:34,851 - main.py[line:223] - DEBUG: 来料箱子配方号：3
+2023-10-08 17:21:34,973 - main.py[line:230] - DEBUG: Round.11/12 start planning...
+2023-10-08 17:21:37,665 - main.py[line:317] - DEBUG: it cost 2.69 s
+2023-10-08 17:22:16,442 - main.py[line:223] - DEBUG: 来料箱子配方号：4
+2023-10-08 17:22:16,443 - main.py[line:225] - INFO: 垛序规划结束 ！ 
+2023-10-08 17:22:16,558 - main.py[line:230] - DEBUG: Round.12/12 start planning...
+2023-10-08 17:22:21,927 - main.py[line:317] - DEBUG: it cost 5.37 s
+2023-10-08 17:22:22,043 - main.py[line:378] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-10-08 17:22:22,043 - main.py[line:379] - INFO: 路径规划结束 !
+2023-10-08 17:22:22,043 - main.py[line:69] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-10-08 17:22:23,052 - main.py[line:76] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_1.pkl
+2023-10-08 17:22:23,053 - main.py[line:95] - INFO: 等待机器人连接中...

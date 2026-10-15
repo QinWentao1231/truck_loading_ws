@@ -1,0 +1,80 @@
+2023-09-06 22:38:17,023 - main.py[line:46] - INFO: ******垛序及机器人路径规划程序启动 ver.0.1.0-alpha******
+2023-09-06 22:38:17,026 - main.py[line:61] - INFO: 读取参数文件成功！
+2023-09-06 22:38:17,040 - main.py[line:68] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-09-06 22:38:43,650 - main.py[line:75] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-09-06 22:38:43,651 - main.py[line:94] - INFO: 等待机器人连接中...
+2023-09-06 22:40:21,708 - main.py[line:102] - INFO: 连接机器人成功！
+2023-09-06 22:40:21,709 - main.py[line:105] - INFO: 码垛环境初始化成功！
+2023-09-06 22:40:21,720 - main.py[line:110] - INFO: 计算垛序成功！
+2023-09-06 22:40:21,723 - main.py[line:159] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-09-06 22:41:20,844 - main.py[line:188] - DEBUG: 单面码垛放置次数：11
+2023-09-06 22:41:20,879 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:41:20,910 - main.py[line:228] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-09-06 22:41:20,911 - main.py[line:229] - DEBUG: Round.1/74 start planning...
+2023-09-06 22:41:32,712 - main.py[line:316] - DEBUG: it cost 11.80 s
+2023-09-06 22:41:37,466 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:41:37,524 - main.py[line:229] - DEBUG: Round.2/74 start planning...
+2023-09-06 22:41:48,922 - main.py[line:316] - DEBUG: it cost 11.40 s
+2023-09-06 22:41:50,656 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:41:50,699 - main.py[line:229] - DEBUG: Round.3/74 start planning...
+2023-09-06 22:42:01,474 - main.py[line:316] - DEBUG: it cost 10.77 s
+2023-09-06 22:42:02,958 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:42:02,986 - main.py[line:229] - DEBUG: Round.4/74 start planning...
+2023-09-06 22:42:09,862 - main.py[line:316] - DEBUG: it cost 6.87 s
+2023-09-06 22:42:11,435 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:42:11,473 - main.py[line:229] - DEBUG: Round.5/74 start planning...
+2023-09-06 22:42:17,457 - main.py[line:316] - DEBUG: it cost 5.98 s
+2023-09-06 22:42:19,244 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:42:19,285 - main.py[line:229] - DEBUG: Round.6/74 start planning...
+2023-09-06 22:42:28,200 - main.py[line:316] - DEBUG: it cost 8.91 s
+2023-09-06 22:42:29,835 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:42:29,878 - main.py[line:229] - DEBUG: Round.7/74 start planning...
+2023-09-06 22:42:37,148 - main.py[line:316] - DEBUG: it cost 7.27 s
+2023-09-06 22:42:38,782 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:42:38,822 - main.py[line:229] - DEBUG: Round.8/74 start planning...
+2023-09-06 22:42:44,596 - main.py[line:316] - DEBUG: it cost 5.77 s
+2023-09-06 22:43:22,675 - main.py[line:381] - WARNING: 机器人已断开连接 ！
+2023-09-06 22:43:22,676 - main.py[line:68] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\
+2023-09-06 22:43:23,695 - main.py[line:75] - INFO: 读取垛型配置文件成功！配置文件路径为 D:\MyWorkcells\Pycharm\8_Path_3D\pkl_data\testblock_2.pkl
+2023-09-06 22:43:23,697 - main.py[line:94] - INFO: 等待机器人连接中...
+2023-09-06 22:45:04,870 - main.py[line:102] - INFO: 连接机器人成功！
+2023-09-06 22:45:04,870 - main.py[line:105] - INFO: 码垛环境初始化成功！
+2023-09-06 22:45:04,871 - main.py[line:110] - INFO: 计算垛序成功！
+2023-09-06 22:45:04,872 - main.py[line:159] - DEBUG: 总箱数: 232, 码垛面数：7, 箱子尺寸：长457 宽257 高577
+2023-09-06 22:45:07,970 - main.py[line:188] - DEBUG: 单面码垛放置次数：11
+2023-09-06 22:45:07,988 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:45:08,014 - main.py[line:228] - INFO: *****************NO.1 码垛面 开始！*****************
+2023-09-06 22:45:08,014 - main.py[line:229] - DEBUG: Round.1/74 start planning...
+2023-09-06 22:45:12,878 - main.py[line:316] - DEBUG: it cost 4.86 s
+2023-09-06 22:45:15,245 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:45:15,265 - main.py[line:229] - DEBUG: Round.2/74 start planning...
+2023-09-06 22:45:20,260 - main.py[line:316] - DEBUG: it cost 4.99 s
+2023-09-06 22:45:22,865 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:45:22,886 - main.py[line:229] - DEBUG: Round.3/74 start planning...
+2023-09-06 22:45:30,234 - main.py[line:316] - DEBUG: it cost 7.35 s
+2023-09-06 22:45:32,513 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:45:32,537 - main.py[line:229] - DEBUG: Round.4/74 start planning...
+2023-09-06 22:45:40,259 - main.py[line:316] - DEBUG: it cost 7.72 s
+2023-09-06 22:45:42,497 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:45:42,522 - main.py[line:229] - DEBUG: Round.5/74 start planning...
+2023-09-06 22:45:48,322 - main.py[line:316] - DEBUG: it cost 5.80 s
+2023-09-06 22:45:50,863 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:45:50,891 - main.py[line:229] - DEBUG: Round.6/74 start planning...
+2023-09-06 22:45:54,774 - main.py[line:316] - DEBUG: it cost 3.88 s
+2023-09-06 22:45:57,465 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:45:57,493 - main.py[line:229] - DEBUG: Round.7/74 start planning...
+2023-09-06 22:46:03,114 - main.py[line:316] - DEBUG: it cost 5.62 s
+2023-09-06 22:46:05,335 - main.py[line:222] - DEBUG: 来料箱子配方号：2
+2023-09-06 22:46:05,366 - main.py[line:229] - DEBUG: Round.8/74 start planning...
+2023-09-06 22:46:10,328 - main.py[line:316] - DEBUG: it cost 4.96 s
+2023-09-06 22:46:12,883 - main.py[line:222] - DEBUG: 来料箱子配方号：4
+2023-09-06 22:46:12,908 - main.py[line:229] - DEBUG: Round.9/74 start planning...
+2023-09-06 22:46:18,146 - main.py[line:316] - DEBUG: it cost 5.24 s
+2023-09-06 22:46:20,333 - main.py[line:222] - DEBUG: 来料箱子配方号：6
+2023-09-06 22:46:20,360 - main.py[line:229] - DEBUG: Round.10/74 start planning...
+2023-09-06 22:46:29,624 - main.py[line:316] - DEBUG: it cost 9.26 s
+2023-09-06 22:46:31,796 - main.py[line:222] - DEBUG: 来料箱子配方号：6
+2023-09-06 22:46:31,823 - main.py[line:229] - DEBUG: Round.11/74 start planning...
+2023-09-06 22:46:42,309 - main.py[line:316] - DEBUG: it cost 10.49 s
+2023-09-06 22:46:42,505 - main.py[line:374] - INFO: *****************NO.1 码垛面 结束！*****************
+2023-09-06 22:46:42,506 - main.py[line:375] - INFO: *****************NO.2 码垛面 开始！*****************

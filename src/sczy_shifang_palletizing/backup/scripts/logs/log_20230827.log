@@ -1,0 +1,54 @@
+2023-08-27 11:07:51,357 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:07:51,358 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:08:10,867 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:08:10,869 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-27 11:08:10,869 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-27 11:08:44,363 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:08:44,363 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:08:53,412 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:08:53,413 - main.py[line:75] - ERROR: 读取参数文件失败,请检查项目根目录config.json文件
+2023-08-27 11:08:53,413 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-27 11:08:53,413 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-27 11:08:53,413 - main.py[line:83] - ERROR: 创建机器人服务器失败，请检查项目根目录config.json文件
+2023-08-27 11:08:53,413 - main.py[line:84] - INFO: 连接机器人成功！
+2023-08-27 11:18:33,267 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:18:33,268 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:18:50,447 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:19:25,807 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:19:25,807 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:19:35,230 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:21:30,799 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:21:30,799 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:21:41,725 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:22:10,188 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:22:10,189 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:22:19,255 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:22:19,257 - main.py[line:77] - INFO: 读取参数文件成功！
+2023-08-27 11:22:19,257 - main.py[line:80] - INFO: 等待机器人连接中...
+2023-08-27 11:22:56,612 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:22:56,612 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:23:06,132 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:23:06,133 - main.py[line:75] - ERROR: 读取参数文件失败,请检查项目根目录config.json文件
+2023-08-27 11:23:06,133 - main.py[line:77] - INFO: 读取参数文件成功！
+2023-08-27 11:23:06,134 - main.py[line:80] - INFO: 等待机器人连接中...
+2023-08-27 11:23:06,134 - main.py[line:84] - ERROR: 创建机器人服务器失败，请检查项目根目录config.json文件
+2023-08-27 11:23:06,134 - main.py[line:85] - INFO: 连接机器人成功！
+2023-08-27 11:23:36,157 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:23:36,157 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:23:47,550 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:23:47,552 - main.py[line:75] - ERROR: 读取参数文件失败,请检查项目根目录config.json文件
+2023-08-27 11:26:25,146 - main.py[line:48] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:26:25,147 - main.py[line:51] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:26:33,597 - main.py[line:55] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:26:33,598 - main.py[line:75] - ERROR: 读取参数文件失败,请检查项目根目录config.json文件
+2023-08-27 11:26:33,598 - main.py[line:76] - INFO: 读取参数文件成功！
+2023-08-27 11:26:33,598 - main.py[line:79] - INFO: 等待机器人连接中...
+2023-08-27 11:26:33,598 - main.py[line:83] - ERROR: 创建机器人服务器失败，请检查项目根目录config.json文件
+2023-08-27 11:26:33,598 - main.py[line:84] - INFO: 连接机器人成功！
+2023-08-27 11:28:09,301 - main.py[line:49] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:28:09,302 - main.py[line:52] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:28:22,040 - main.py[line:56] - INFO: 读取垛型配置文件成功！
+2023-08-27 11:28:22,040 - main.py[line:76] - ERROR: 读取参数文件失败,请检查项目根目录config.json文件
+2023-08-27 11:29:05,785 - main.py[line:49] - INFO: ******垛序及机器人路径规划程序启动******
+2023-08-27 11:29:05,785 - main.py[line:52] - WARNING: 已启用离线模式，垛型参数文件夹为 D:\MyWorkcells\Pycharm\8_Path_3D\testdata_1-8\
+2023-08-27 11:29:14,301 - main.py[line:56] - INFO: 读取垛型配置文件成功！

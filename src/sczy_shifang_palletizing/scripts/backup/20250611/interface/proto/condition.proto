@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+message Size{
+    float L = 1;
+    float W = 2;
+    float H = 3;
+}
+
+message Grip{
+    repeated int32 P1 = 1;
+    repeated int32 P2 = 2;
+    repeated int32 P3 = 3;
+}
+
+message CarCondition{
+    string type = 1;
+    Size original = 2;
+    Size reserve = 3;
+    Size frame = 4;
+}
+
+message BoxCondition{
+    string type = 1;
+    Size original = 2;
+    Size reserve = 3;
+    Grip grip = 4;
+    int32 Nt = 5;
+}
+
+message Limitation{
+    int32 N1min = 1;
+    int32 T3max = 2;
+    int32 N2max = 3;
+    int32 T12min = 4;
+    repeated int32 Elim = 5;
+    bool Istrapezoid = 6;
+    int32 Strategy = 7;
+    int32 P1P2gap = 8;
+    int32 G = 9;
+    int32 Tback = 10;
+    repeated int32 Overlap = 11;
+}
+
+message Condition{
+    CarCondition car = 1;
+    repeated BoxCondition boxes = 2;
+    Limitation limit = 3;
+}
