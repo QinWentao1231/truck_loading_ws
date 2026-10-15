@@ -15,6 +15,31 @@ Ubuntu/ROS 版本，应保证虚拟环境与该系统的 `/usr/bin/python3` 主�
 | `pointcloud_process` | 独立的点云角点及垛面检测工具 | `stacking_detection_node` |
 | `cabin_width_check` | 多站点云拼接、车厢宽度切片测量、超限判断及 RViz 显示 | `width_check_node` |
 | `robot_process` | 垛型接收、垛序解析、角点/垛面检测、路径规划、断点续传及机器人 TCP 通信 | `robot_process_node` |
+| [`sczy_shifang_palletizing`](src/sczy_shifang_palletizing/README.md) | 四川中烟·什邡工厂专用装车：原版垛序、四点规则路径、旧版规划器及机器人通信协议；不运行RRT | `sczy_shifang_palletizing_node` |
+
+### 两个装车主流程如何选择
+
+`robot_process` 与 `sczy_shifang_palletizing` 是**独立的现场版本**，不是需要一起启动的上下游节点。
+
+| 对比项 | `robot_process` | `sczy_shifang_palletizing` |
+| --- | --- | --- |
+| 用途 | 当前主版本装车流程，支持常规、梯形、混装及异形车头等场景 | 四川中烟·什邡工厂的旧接口装车流程 |
+| 垛序 | 当前主版本垛序规则 | 恢复什邡原版垛序，保留原有分抓、方向及尾料规则 |
+| 路径 | 主版本路径计算及前置校验 | 保留迁移后的 `x0 → x1 → APP → goal` 四点规则，不运行RRT/RRT* |
+| 接口 | 本包当前proto及机器人命令报文 | 保留什邡旧proto和四条命令报文，不可直接替换成主版本接口 |
+| 点云检测 | 集成角点与垛面检测 | 不包含雷达采集、角点/垛面检测；需要补偿时读取外部角点服务 |
+| 部署依赖 | 包含Open3D、OpenCV等点云依赖 | 可单独复制和部署，不依赖robot_process、Open3D、OpenCV或Rtree |
+
+什邡包由原 `palletizing_sczy` 整理并重命名，旧目录名不再作为启动包名使用。
+其旧垛序对P2、E=3等情况支持不完整，声明箱数与生成动作不一致时会拒收，
+不能视为拥有主版本的全部垛型能力。四点路径检查也不等同于完整连续避碰或关节可达性检查。
+
+两个版本默认都使用机器人TCP端口 `8001`、规划器gRPC端口 `5007`，
+**不要在同一电脑上按默认端口同时启动**。规划器和机器人必须连接对应现场版本，不能混用报文。
+
+只部署什邡版本时，请直接按照
+[什邡包：新电脑首次创建工作空间](src/sczy_shifang_palletizing/README.md#新电脑首次创建工作空间)
+操作；下面的OpenCV/Open3D环境准备主要面向 `robot_process` 及点云功能包，无需照搬到什邡专用环境。
 
 ## 目录说明
 
@@ -195,7 +220,7 @@ source install/setup.bash
 
 ## 常用启动命令
 
-每个新终端都需要先执行：
+主版本及点云节点的每个新终端都需要先执行（什邡版本使用下方单独环境说明）：
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -240,6 +265,38 @@ ros2 run pointcloud_subscriber pointcloud_save_node
 ```bash
 ros2 run hesai_ros_driver hesai_ros_driver_node
 ```
+
+## sczy_shifang_palletizing 运行方式
+
+完整首次部署步骤见[什邡包README](src/sczy_shifang_palletizing/README.md)。
+已按照该文档创建虚拟环境并安装依赖后，在工作空间根目录执行：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/venvs/sczy_shifang/bin/activate
+python -m colcon build --packages-select sczy_shifang_palletizing
+source install/setup.bash
+
+# 首次先验证配置和节点，不监听订单/机器人端口，不下发路径
+ros2 launch sczy_shifang_palletizing sczy_shifang_palletizing.launch.py enable_network:=false
+```
+
+按Ctrl+C退出验证，核对现场配置后再正式启动：
+
+```bash
+ros2 launch sczy_shifang_palletizing sczy_shifang_palletizing.launch.py
+```
+
+- 配置文件：`src/sczy_shifang_palletizing/config/planner.json`；默认加载构建后安装的配置，修改后需重新构建并重启，或通过 `config_file` 指定配置路径。
+- 订单时序：先由规划器成功下发旧协议订单，再让机器人连接。
+- 角点补偿：`use_corner=true` 时读取外部角点服务，默认 `192.168.1.100:9002`；不是启动本包内部的点云检测。
+- 可视化：`show_env=true` 时，成功下发路径后保存每抓HTML，不自动打开浏览器。
+- 路径检查：`chk_enable=true` 时，在路径下发前执行现有检查；失败则记录并结束本次连接，不下发失败路径、不自动重放订单。
+- 日志目录：默认 `~/.ros/log/sczy_shifang_palletizing/`；HTML位于其 `visualizations/` 子目录，可通过 `log_dir` 指定其他位置。
+
+本包已在ROS2 Jazzy/Python 3.12验证；Humble/Python 3.10尚未实机验证。
+以下 `robot_process` 的混装、异形车头、前置校验状态码、断点续传及新版数据块定义，
+**不适用于什邡旧协议版本**。
 
 ## robot_process 运行方式
 
