@@ -1,5 +1,7 @@
 # 四川中烟·什邡工厂装车功能包
 
+**适用范围：仅用于四川中烟—什邡工厂。** 本包的现场配置、垛序规则和旧版通信协议仅适用于该工厂。
+
 ROS2包名：**sczy_shifang_palletizing**。由原 palletizing_sczy 独立迁移，
 不修改工作空间内的 robot_process 或其他功能包。
 

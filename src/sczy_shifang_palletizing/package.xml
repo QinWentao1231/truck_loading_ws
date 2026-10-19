@@ -2,7 +2,7 @@
 <package format="3">
   <name>sczy_shifang_palletizing</name>
   <version>0.1.0</version>
-  <description>Sichuan China Tobacco Shifang: legacy stacking and rule-based ROS2 paths.</description>
+  <description>For use only at Sichuan China Tobacco's Shifang factory: legacy stacking and rule-based ROS2 paths.</description>
   <maintainer email="nvidia@todo.todo">nvidia</maintainer>
   <!-- 原包未指定授权；迁移不擅自更改原代码许可证。 -->
   <license>TODO</license>

@@ -1,0 +1,102 @@
+{
+  "baseline": {
+    "accepted": 12,
+    "rejected": 0,
+    "physical_overlap_actions": 0,
+    "nominal_lateral_overrun_actions": 0
+  },
+  "constructed_regular_orders": {
+    "orders": 207,
+    "accepted": 1279,
+    "rejected": 53,
+    "physical_overlap_actions": 0,
+    "nominal_lateral_overrun_actions": 37
+  },
+  "sequence_comparison": "all evaluated orders match the archived legacy sequence",
+  "synthetic_middle_segment": {
+    "path": [
+      [
+        200.0,
+        1200.0,
+        1420.0
+      ],
+      [
+        200.0,
+        225.0,
+        1420.0
+      ],
+      [
+        50.0,
+        100.0,
+        50.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "size": [
+      460.0,
+      500.0,
+      680.0
+    ],
+    "obstacle": [
+      0,
+      200.0,
+      750,
+      460.0,
+      450.0,
+      1330.0
+    ],
+    "current_issues": [],
+    "swept_overlap": {
+      "interval": [
+        0.06569343065693431,
+        0.9854014598540146
+      ],
+      "example_point": [
+        121.16788321167883,
+        159.3065693430657,
+        700.0
+      ]
+    },
+    "legacy_edge_check_passes": false,
+    "mock_runtime_sent_bytes": [
+      180
+    ]
+  },
+  "constructed_narrow_car": {
+    "width": 2300,
+    "path": [
+      [
+        200.0,
+        1200.0,
+        1420.0
+      ],
+      [
+        200.0,
+        250.0,
+        1420.0
+      ],
+      [
+        50.0,
+        100.0,
+        50.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "size": [
+      460.0,
+      1200.0,
+      680.0
+    ],
+    "current_issues": [],
+    "x0_right_overrun_mm": 100.0
+  },
+  "vertex_only_check_misses_containment": true
+}

@@ -1,0 +1,42 @@
+# 什邡归档代码的有效参数摘录，仅供核对；未接入任何运行配置。
+# 来源：ext_dense_feature.zip / pipeline_control/config/basic_2.yaml
+# 归档 SHA256: cf8ea0df6a3b47db8184800ce5d8ae17832ca2139ff73fa6d7becdcd6be34fe0
+# 平移单位 m；四元数按字段名读取，Eigen 构造顺序为 qw,qx,qy,qz。
+# scanner_z_to_robot_base 作用于已完成转台补偿的扫描点云/角点。
+# 原始雷达点还需 lidar_to_scanner 和对应时刻的转台角度。
+scanner_z_to_robot_base:
+  x: 0.629
+  y: -0.469193
+  z: -0.558983
+  qx: 0.00271
+  qy: 0.0007761
+  qz: 0.0072169
+  qw: 0.99997
+lidar_to_scanner:
+  x: 0
+  y: 0.0
+  z: 0.000261
+  qx: 0.0
+  qy: 0.0
+  qz: 0.707106
+  qw: 0.707106
+scanner_z_to_scanner:
+  roll: 0
+  temp_angle_offset: 720
+  scanner_lidar_rotation: 90
+robot_base_to_base_link:
+  x: 0.57
+  y: 0.475
+  z: 0.544
+  qw: 1.0
+  qx: 0.0
+  qy: 0.0
+  qz: 0.0
+vice_lidar_to_lidar_z:
+  x: -0.592878522787391
+  y: 2.57155261858015
+  z: -0.0213644875600896
+  qw: 0.00875128070562488
+  qx: 0.999816777730975
+  qy: -0.0152277946828371
+  qz: 0.0076118540947155

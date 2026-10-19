@@ -21,6 +21,8 @@ Ubuntu/ROS 版本，应保证虚拟环境与该系统的 `/usr/bin/python3` 主�
 
 `robot_process` 与 `sczy_shifang_palletizing` 是**独立的现场版本**，不是需要一起启动的上下游节点。
 
+`sczy_shifang_palletizing` **仅用于四川中烟—什邡工厂**，其现场配置、垛序规则和旧版通信协议仅适用于该工厂。
+
 | 对比项 | `robot_process` | `sczy_shifang_palletizing` |
 | --- | --- | --- |
 | 用途 | 当前主版本装车流程，支持常规、梯形、混装及异形车头等场景 | 四川中烟·什邡工厂的旧接口装车流程 |

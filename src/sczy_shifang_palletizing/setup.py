@@ -19,7 +19,7 @@ setup(
     zip_safe=False,
     maintainer='nvidia',
     maintainer_email='nvidia@todo.todo',
-    description='Sichuan China Tobacco Shifang: legacy stacking and rule-based paths.',
+    description="For use only at Sichuan China Tobacco's Shifang factory: legacy stacking and rule-based ROS2 paths.",
     license='TODO',
     extras_require={'test': ['pytest']},
     entry_points={'console_scripts': [
